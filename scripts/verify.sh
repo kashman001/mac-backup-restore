@@ -26,11 +26,11 @@ check() {
 }
 
 skip() {
-    info "$1 — skipped (not applicable)"
+    info "$1 — skipped"
     ((SKIP++))
 }
 
-# ── Homebrew ─────────────────────────────────────────────────────────────────
+# ── Core Tools ───────────────────────────────────────────────────────────────
 phase "Core Tools"
 
 check "Homebrew installed" "has brew"
@@ -51,10 +51,22 @@ if [ -d "$HOME/.ssh" ]; then
     check "SSH directory exists" "[ -d ~/.ssh ]"
     check "SSH directory permissions (700)" "[ \$(stat -f '%A' ~/.ssh) = '700' ]"
 
-    # Check for at least one key pair
-    if ls ~/.ssh/id_* &>/dev/null; then
-        check "SSH keys present" "ls ~/.ssh/id_* &>/dev/null"
-        check "SSH key permissions" "[ \$(stat -f '%A' ~/.ssh/id_ed25519 2>/dev/null || stat -f '%A' ~/.ssh/id_rsa 2>/dev/null) = '600' ]"
+    if ls ~/.ssh/id_* ~/.ssh/*-GitHub 2>/dev/null | head -1 &>/dev/null; then
+        check "SSH keys present" "ls ~/.ssh/id_* ~/.ssh/*-GitHub 2>/dev/null | head -1"
+
+        # Check private key permissions
+        for key in ~/.ssh/id_* ~/.ssh/*-GitHub; do
+            [ -f "$key" ] || continue
+            echo "$key" | grep -q '\.pub$' && continue
+            PERM=$(stat -f '%A' "$key" 2>/dev/null)
+            if [ "$PERM" = "600" ]; then
+                log "  $key permissions OK (600)"
+                ((PASS++))
+            else
+                err "  $key permissions are $PERM (should be 600)"
+                ((FAIL++))
+            fi
+        done
     else
         skip "SSH keys (none found)"
     fi
@@ -106,18 +118,78 @@ for editor in code cursor; do
     fi
 done
 
+# Docker
+if has docker; then
+    check "Docker CLI available" "has docker"
+    if docker info &>/dev/null; then
+        log "Docker daemon running"
+        ((PASS++))
+    else
+        warn "Docker CLI present but daemon not running — open Docker Desktop"
+        ((SKIP++))
+    fi
+fi
+
+# ── Homebrew Health ──────────────────────────────────────────────────────────
+phase "Homebrew Health"
+
+if has brew; then
+    FORMULA_COUNT=$(brew list --formula 2>/dev/null | wc -l | tr -d ' ')
+    CASK_COUNT=$(brew list --cask 2>/dev/null | wc -l | tr -d ' ')
+    log "$FORMULA_COUNT formulae, $CASK_COUNT casks installed"
+    ((PASS++))
+
+    # Check for common expected tools
+    for expected in git gh node python@3.13 ripgrep imagemagick; do
+        if brew list --formula "$expected" &>/dev/null; then
+            log "  brew: $expected"
+            ((PASS++))
+        fi
+    done
+
+    for expected in visual-studio-code cursor docker iterm2 ghostty; do
+        if brew list --cask "$expected" &>/dev/null; then
+            log "  cask: $expected"
+            ((PASS++))
+        fi
+    done
+fi
+
 # ── Directory Structure ──────────────────────────────────────────────────────
 phase "Directory Structure"
 
 check "~/Developer exists" "[ -d ~/Developer ]"
 check "~/Developer/personal exists" "[ -d ~/Developer/personal ]"
 check "~/Developer/work exists" "[ -d ~/Developer/work ]"
+check "~/Developer/oss exists" "[ -d ~/Developer/oss ]"
+check "~/Developer/experiments exists" "[ -d ~/Developer/experiments ]"
 check "~/Pictures/Screenshots exists" "[ -d ~/Pictures/Screenshots ]"
 
 # Count projects
 if [ -d "$HOME/Developer" ]; then
     PROJ_COUNT=$(find ~/Developer -maxdepth 3 -name ".git" -type d 2>/dev/null | wc -l | tr -d ' ')
-    info "$PROJ_COUNT projects found in ~/Developer"
+    info "$PROJ_COUNT projects in ~/Developer"
+fi
+
+# ── macOS Settings ───────────────────────────────────────────────────────────
+phase "macOS Settings"
+
+SCREENSHOT_LOC=$(defaults read com.apple.screencapture location 2>/dev/null || echo "")
+if [ "$SCREENSHOT_LOC" = "$HOME/Pictures/Screenshots" ]; then
+    log "Screenshots → ~/Pictures/Screenshots"
+    ((PASS++))
+else
+    warn "Screenshots going to: ${SCREENSHOT_LOC:-default (Desktop)}"
+    ((SKIP++))
+fi
+
+SHOW_EXT=$(defaults read com.apple.finder AppleShowAllExtensions 2>/dev/null || echo "0")
+if [ "$SHOW_EXT" = "1" ]; then
+    log "Finder: showing file extensions"
+    ((PASS++))
+else
+    info "Finder: file extensions hidden"
+    ((SKIP++))
 fi
 
 # ── Cloud Configs ────────────────────────────────────────────────────────────
@@ -125,7 +197,51 @@ phase "Cloud & Infra"
 
 [ -d ~/.aws ]    && check "AWS config present" "[ -f ~/.aws/config ] || [ -f ~/.aws/credentials ]" || skip "AWS"
 [ -d ~/.kube ]   && check "Kubernetes config present" "[ -f ~/.kube/config ]" || skip "Kubernetes"
-[ -d ~/.docker ] && check "Docker config present" "[ -d ~/.docker ]" || skip "Docker"
+[ -d ~/.docker ] && check "Docker config present" "[ -d ~/.docker ]" || skip "Docker config"
+
+# ── Applications ─────────────────────────────────────────────────────────────
+phase "Key Applications"
+
+EXPECTED_APPS=(
+    "1Password.app"
+    "Arc.app"
+    "Claude.app"
+    "Cursor.app"
+    "Docker.app"
+    "Ghostty.app"
+    "Google Chrome.app"
+    "JetBrains Toolbox.app"
+    "Obsidian.app"
+    "Steam.app"
+    "Visual Studio Code.app"
+    "Warp.app"
+    "iTerm.app"
+)
+
+for app in "${EXPECTED_APPS[@]}"; do
+    if [ -d "/Applications/$app" ]; then
+        log "$app"
+        ((PASS++))
+    else
+        warn "Missing: $app"
+        ((FAIL++))
+    fi
+done
+
+# ── Steam ────────────────────────────────────────────────────────────────────
+phase "Steam & Games"
+
+if [ -d "/Applications/Steam.app" ]; then
+    check "Steam installed" "[ -d /Applications/Steam.app ]"
+    STEAM_MANIFESTS=$(ls "$HOME/Library/Application Support/Steam/steamapps"/appmanifest_*.acf 2>/dev/null | wc -l | tr -d ' ')
+    info "$STEAM_MANIFESTS games currently installed in Steam"
+fi
+
+if [ -d "/Applications/CrossOver.app" ]; then
+    check "CrossOver installed" "[ -d /Applications/CrossOver.app ]"
+    BOTTLE_COUNT=$(ls "$HOME/Library/Application Support/CrossOver/Bottles/" 2>/dev/null | wc -l | tr -d ' ')
+    info "$BOTTLE_COUNT CrossOver bottles present"
+fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 echo ""

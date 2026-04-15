@@ -22,7 +22,7 @@ A clean migration toolkit for moving to a new Mac without Migration Assistant. I
 
 Migration Assistant copies everything — every preference, every daemon, every stale cache and orphaned config file accumulated over years. That works, but it defeats the purpose of getting a new machine. This toolkit takes the opposite approach: capture only what you need, then rebuild from scratch. You get a clean system with an organized layout, and you know exactly what's on it.
 
-The design follows three principles: be declarative where possible (Brewfile over a list of manual installs), be interactive where judgment is needed (prompting before each personal folder), and be verifiable (a dedicated script to confirm everything landed correctly).
+The design follows four principles: assume chaos on the old Mac (scan everywhere, classify what you find), be declarative where possible (Brewfile over a list of manual installs), normalize on restore (install via Homebrew even if the original was a .dmg), and be verifiable (a dedicated script to confirm everything landed correctly).
 
 ---
 
@@ -77,8 +77,11 @@ When you run backup.sh, it creates a timestamped directory on the external drive
 /Volumes/YourDrive/mac-backup/20260415_120000/
 ├── software-inventory/
 │   ├── Brewfile                 ← declarative Homebrew manifest (taps, formulae, casks, MAS apps)
+│   ├── Brewfile.addon           ← apps that WERE manual but CAN become Brew casks on the new Mac
+│   ├── install-sources.txt      ← classification of every app (brew-cask, mas, manual, bundled)
 │   ├── applications.txt         ← ls /Applications
 │   ├── user-applications.txt    ← ls ~/Applications
+│   ├── usr-local-bin.txt        ← /usr/local/bin inventory (standalone installers, Docker CLIs)
 │   ├── brew-formulae.txt        ← all installed Homebrew formulae
 │   ├── brew-casks.txt           ← all installed Homebrew casks
 │   ├── brew-taps.txt            ← active Homebrew taps
@@ -90,9 +93,16 @@ When you run backup.sh, it creates a timestamped directory on the external drive
 │   ├── ruby-gems.txt            ← locally installed Ruby gems
 │   ├── go-binaries.txt          ← compiled Go binaries
 │   ├── vscode-extensions.txt    ← VS Code extension IDs
-│   └── cursor-extensions.txt    ← Cursor extension IDs
+│   ├── cursor-extensions.txt    ← Cursor extension IDs
+│   ├── conda-environments.txt   ← list of Anaconda environments
+│   ├── conda-envs/              ← exported conda environment YAML files
+│   └── steam/
+│       ├── installed-games.txt  ← Steam games installed on this Mac
+│       ├── crossover-games.txt  ← Windows games running via CrossOver
+│       └── loginusers.vdf       ← Steam account info
 ├── config/
-│   ├── dotfiles/                ← shell configs, git config, editor configs, version managers
+│   ├── dotfiles/                ← ALL dotfiles from ~ (scanned, not just hardcoded list)
+│   │   └── _manifest.txt        ← what was found and copied
 │   ├── ssh/                     ← SSH keys, config, known_hosts
 │   ├── gnupg/                   ← exported GPG secret keys and trust database
 │   ├── dot-config/              ← full ~/.config directory (caches excluded)
@@ -102,10 +112,16 @@ When you run backup.sh, it creates a timestamped directory on the external drive
 ├── app-settings/
 │   ├── vscode/                  ← settings.json, keybindings.json, snippets
 │   ├── cursor/                  ← settings.json, keybindings.json, snippets
+│   ├── ghostty/                 ← Ghostty terminal config
 │   ├── iterm2/                  ← com.googlecode.iterm2.plist
+│   ├── warp/                    ← Warp terminal settings
+│   ├── pycharm/                 ← PyCharm code styles, keymaps, options
+│   ├── obsidian/                ← Obsidian vault config
 │   └── macos-defaults-full.txt  ← complete macOS defaults database
+├── crossover/                   ← CrossOver bottles (optional, can be very large)
 ├── projects/
 │   ├── _project-list.txt        ← manifest of all discovered project paths
+│   ├── _orphan-code-files.txt   ← code files found outside any git repo
 │   └── <original-path>/         ← project files, mirroring home directory structure
 │       └── <project-name>/          (node_modules, .venv, build dirs excluded)
 ├── files/
@@ -120,7 +136,9 @@ When you run backup.sh, it creates a timestamped directory on the external drive
     └── LaunchAgents/            ← ~/Library/LaunchAgents plist files
 ```
 
-The separation into six top-level directories on the backup drive mirrors the six logical phases of the backup script. Each directory is self-contained and independently useful — you could restore just your dotfiles or just your Brewfile without touching anything else.
+The key addition compared to a typical backup tool is the `install-sources.txt` classification file and `Brewfile.addon`. The backup scans every app in /Applications, figures out how it was originally installed (Homebrew cask, Mac App Store, manual download, macOS-bundled), and for manual installs, checks if a Homebrew cask exists. The addon Brewfile contains cask entries for all those apps, so the restore can install them cleanly via Homebrew even though they were originally .dmg downloads.
+
+Each directory is self-contained and independently useful — you could restore just your dotfiles or just your Brewfile without touching anything else.
 
 ---
 
@@ -173,7 +191,11 @@ The XDG Base Directory Specification (freedesktop.org) defines `~/.config` as th
 
 **Sensitive material flagged explicitly.** The scripts use a distinct `sensitive` log marker (a lock icon) whenever they handle SSH keys, GPG keys, or cloud credentials. This is a deliberate UX choice: you should always know when secret material is being written to or read from the backup drive.
 
-**Project discovery by .git directory.** Rather than requiring you to maintain a list of project paths, the backup script scans common code directories (~/Projects, ~/Developer, ~/code, ~/repos, ~/src, ~/workspace, ~/dev, ~/work, ~/Sites, ~/Documents, ~/Desktop) up to 4 levels deep looking for `.git` directories. This catches everything without needing configuration. The depth limit of 4 prevents the scan from going into node_modules or other deep nested structures.
+**Organic-to-clean migration.** The backup script assumes your current Mac is an adhoc setup — apps installed through a mix of methods, code scattered across multiple directories, configs accumulated over years. It scans everywhere and classifies what it finds. The restore script then normalizes everything: Homebrew for all apps, ~/Developer/ for all code, proper permissions on all keys. You go from organic to organized without losing anything.
+
+**Brew-first install strategy.** The backup classifies every app in /Applications by install source and generates a Brewfile.addon for apps that were manually installed but have Homebrew casks available. On the new Mac, these get installed through Homebrew instead of manual downloads. This means `brew upgrade` keeps everything updated going forward — no more hunting for .dmg update dialogs.
+
+**Project discovery by .git directory.** Rather than requiring you to maintain a list of project paths, the backup script scans the entire home directory up to 5 levels deep looking for `.git` directories, excluding Library, Trash, and dependency directories. This catches everything regardless of where you happened to clone it. It also scans for orphan code files (scripts, notebooks) that aren't inside any git repo.
 
 **Smart exclusions for project backups.** Projects are backed up without their generated artifacts. The exclusion list covers the major ecosystems: node_modules (JavaScript), .venv/venv (Python), target (Rust/Java), build/dist (general), .next/.nuxt (frameworks), Pods/DerivedData (iOS), .gradle (JVM), .cache, .idea, .DS_Store, and compiled object files. This often reduces a project from gigabytes to megabytes.
 
@@ -209,21 +231,21 @@ If you run it without arguments, it prints available volumes to help you find yo
 
 ### What happens
 
-The script runs through six phases in order:
+The script assumes an organic, adhoc setup — software installed through a mix of Homebrew, Mac App Store, direct downloads, standalone .pkg installers, JetBrains Toolbox, Docker Desktop, and CrossOver. It scans everything and classifies what it finds.
 
-**Phase 1 — Software Inventory.** Generates a Brewfile using `brew bundle dump`, which captures every tap, formula, cask, and Mac App Store app in a single declarative file. Also captures package lists from npm, pip3, pipx, cargo, gem, and Go, plus extension lists from VS Code and Cursor. Each tool is detected with `command -v` before being invoked, so missing tools are skipped with a warning rather than an error.
+**Phase 1 — Software Inventory.** Generates a Brewfile via `brew bundle dump`. Lists all apps in /Applications, then classifies each one by install source (Homebrew cask, Mac App Store, manual download, macOS-bundled) using a built-in mapping table. For manual installs, it checks if a Homebrew cask exists and generates a `Brewfile.addon` — this is what lets the restore convert manual installs to Homebrew. Also captures /usr/local/bin (standalone tools like Docker CLIs), package lists from npm, pip3, pipx, cargo, gem, Go, and extension lists from VS Code and Cursor. Exports Anaconda/conda environments as YAML files for recreation on the new Mac. Scans Steam for installed games (parsing appmanifest .acf files) and CrossOver game launchers (parsing Desktop .app bundles that call `steam://run/`).
 
-**Phase 2 — Dotfiles & Config.** Copies a predefined list of dotfiles from your home directory. The list covers shell configs (zsh, bash), git, vim, tmux, package manager configs (npm, yarn, gem), editor configs, and version manager files (asdf, pyenv, nvm, rbenv). It also backs up your full `~/.ssh` directory (keys, config, known_hosts), exports GPG secret keys and trust database via `gpg --export-secret-keys --armor`, copies the entire `~/.config` directory (excluding caches and logs), and grabs AWS, Kubernetes, and Docker configs.
+**Phase 2 — Dotfiles & Config.** Instead of only copying a hardcoded list, it first grabs known priority dotfiles, then scans `~/` for any additional dotfiles it didn't predict. This catches organic configs that accumulate over time. Also backs up SSH, GPG, ~/.config, and cloud credentials (AWS, Kubernetes, Docker).
 
-**Phase 3 — Application Settings.** Copies settings files from VS Code, Cursor, and iTerm2 from their macOS-specific `Library/Application Support` paths. Also exports the complete macOS defaults database via `defaults read`, which captures every preference you've ever set through System Settings or the command line.
+**Phase 3 — Application Settings.** Copies settings from VS Code, Cursor, Ghostty, iTerm2, Warp, PyCharm (via JetBrains config directories), and Obsidian. Exports the full macOS defaults database. Optionally backs up CrossOver bottles (which can be tens of gigabytes if you have Windows games installed).
 
-**Phase 4 — Project Discovery.** Scans 11 common code directories up to 4 levels deep for `.git` directories. Deduplicates and displays the list with line numbers. Prompts for confirmation before backing up. Uses rsync with 16 exclusion patterns to skip generated artifacts. Each project is stored under its original path relative to `~`, preserving the directory structure for reference.
+**Phase 4 — Project Discovery.** Scans the entire home directory up to 5 levels deep for `.git` directories, excluding Library, Trash, node_modules, anaconda3, and virtual environments. Also scans for orphan code files (`.py`, `.ipynb`, `.js`, `.sh`, etc.) that aren't inside any git repo and logs them separately.
 
-**Phase 5 — Personal Files.** Iterates through Documents, Desktop, Downloads, Pictures, Music, and Movies. For each folder, shows its size and asks whether to include it. Uses rsync with `--progress` so you can see transfer status for large folders.
+**Phase 5 — Personal Files.** Warns about iCloud offloading (files may be stubs if Desktop & Documents sync is enabled). Iterates through Documents, Desktop, Downloads, Pictures, Music, and Movies with size and confirmation prompts. Excludes stale IDE workspace metadata.
 
-**Phase 6 — System Config.** Captures the user crontab (if any) and copies Launch Agents from `~/Library/LaunchAgents`.
+**Phase 6 — System Config.** Captures crontab and Launch Agents.
 
-After all phases, it prints a summary showing total backup size and a breakdown by directory.
+After all phases, it prints a summary with total size, breakdown by directory, and pointers to the key files the restore script will use.
 
 ---
 
@@ -252,27 +274,37 @@ If you point it at the drive root instead of a specific timestamp, it lists avai
 
 ### What happens
 
-The script runs through eight steps:
+The restore strategy is: install everything possible through Homebrew (even apps that were manual .dmg installs on the old Mac), organize files into a clean layout, and flag anything that needs manual attention.
 
-**Step 0 — macOS Preferences.** Prompts to apply a curated set of defaults: Finder improvements (show extensions, path bar, status bar, search current folder), Dock settings (auto-hide, 48px icons, don't auto-rearrange Spaces), keyboard (fast key repeat with KeyRepeat=2 and InitialKeyRepeat=15), trackpad (tap to click), screenshot location (~/Pictures/Screenshots), disabling .DS_Store on network and USB volumes, and showing the ~/Library folder. Restarts Finder and Dock to apply changes immediately.
+**Step 0 — macOS Preferences.** Applies a curated set of defaults: Finder improvements, Dock auto-hide, fast key repeat, tap-to-click, screenshots to ~/Pictures/Screenshots, disable .DS_Store on network volumes, and show ~/Library. Restarts Finder and Dock to apply immediately.
 
-**Step 1 — Directory Structure.** Creates the `~/Developer/` tree with `personal/`, `work/`, `oss/`, and `experiments/` subdirectories, plus `~/Pictures/Screenshots/`. This runs without prompting because it's non-destructive (mkdir -p on existing directories is a no-op).
+**Step 1 — Directory Structure.** Creates the `~/Developer/` tree with `personal/`, `work/`, `oss/`, and `experiments/`. This is the "clean slate" layout that replaces the organic scatter of `~/code`, `~/projects`, `~/repos`, etc.
 
-**Step 2 — Homebrew.** Installs Homebrew if not present, including the PATH setup for Apple Silicon Macs (`/opt/homebrew/bin/brew`). Then reads the Brewfile from the backup, shows a category breakdown (formulae, casks, taps, MAS apps), and prompts to install. Uses `brew bundle --no-lock` to avoid creating a Brewfile.lock in the backup directory.
+**Step 2 — Homebrew.** Installs Homebrew if needed (including Apple Silicon PATH setup persisted to ~/.zprofile). Runs `brew bundle` on the original Brewfile first, then on the Brewfile.addon to convert previously manual installs to Homebrew casks. This is the key normalization step — apps that were .dmg downloads on the old Mac become Homebrew-managed on the new one, getting automatic updates via `brew upgrade`.
 
-**Step 3 — Dotfiles & Config.** Lists all backed-up dotfiles and prompts to restore. Creates `.pre-restore` backups of any existing files before overwriting. Restores SSH keys with hardened permissions (700 on directory, 600 on private keys, 644 on public keys and config). Imports GPG keys via `gpg --import`. Restores `~/.config`, and restores cloud configs (AWS, Kubernetes, Docker) with individual prompts for each.
+**Step 3 — Mac App Store.** Installs `mas` CLI if needed, then reinstalls Mac App Store apps from the backup list. Apps like Final Cut Pro, Logic Pro, and Keynote come through here.
 
-**Step 4 — Application Settings.** Restores VS Code and Cursor settings to their `Library/Application Support` paths. For VS Code, also installs all extensions from the backed-up extension list in parallel. Restores iTerm2 preferences plist.
+**Step 4 — Manual Install Check.** Reads the install-sources.txt classification and flags any apps that couldn't be handled by Homebrew or MAS. These need manual download. Accumulates a running TODO list.
 
-**Step 5 — Projects.** Finds all git repos in the backup and restores them into `~/Developer/personal/` by default, flattening the original path structure. If a project already exists at the destination, it's skipped with a warning. After restore, it reminds you to sort projects into `work/` or `oss/` as appropriate.
+**Step 5 — Docker Desktop.** Confirms Docker is installed (via Homebrew cask) and notes that it automatically provides docker, docker-compose, and kubectl CLIs — no need for standalone installs in /usr/local/bin like the old Mac had.
 
-**Step 6 — Personal Files.** Prompts for each backed-up personal folder (Documents, Desktop, etc.) with size information, then restores via rsync.
+**Step 6 — JetBrains.** Checks for JetBrains Toolbox and restores PyCharm settings (code styles, keymaps, options) if available. JetBrains Toolbox handles IDE installation; settings can also sync via JetBrains account.
 
-**Step 7 — System Config.** Shows and prompts to restore the crontab and Launch Agents.
+**Step 7 — Steam & Games.** Lists native macOS Steam games and CrossOver/Steam Windows games from the backup. Optionally restores CrossOver bottles (saves re-downloading game data). Provides steam:// install links for quick redownload.
 
-**Step 8 — Language Packages.** Reinstalls npm global packages by parsing the backed-up npm list output. For pip packages, warns about global installs and suggests virtualenvs before prompting. This step is intentionally last because language packages depend on their runtimes being installed first (via Homebrew in Step 2).
+**Step 8 — Dotfiles & Config.** Restores dotfiles with `.pre-restore` safety backups, SSH keys with hardened permissions, GPG keys, ~/.config, and cloud credentials (AWS, Kubernetes, Docker).
 
-Finishes with a summary of recommended manual next steps: iCloud sign-in, browser sync, SSH key testing, and project reorganization.
+**Step 9 — Application Settings.** Restores settings for VS Code, Cursor, Ghostty, iTerm2, Warp, and Obsidian. Installs VS Code and Cursor extensions in parallel.
+
+**Step 10 — Projects.** Flattens all backed-up projects (regardless of where they were scattered on the old Mac) into `~/Developer/personal/`. Shows where they originally came from. Flags orphan code files that weren't in any git repo.
+
+**Step 11 — Personal Files.** Notes that iCloud will re-sync Documents and Desktop automatically. Restores from backup as supplemental insurance.
+
+**Step 12 — Python & Conda.** Recreates conda environments from exported YAML files. Reinstalls npm globals. This is last because it depends on runtimes from Step 2.
+
+**Step 13 — System Config.** Restores crontab and Launch Agents.
+
+Finishes with a summary including any manual TODO items that accumulated, plus recommended next steps.
 
 ---
 
@@ -284,7 +316,7 @@ Run this on the new Mac after restore.sh completes.
 ./scripts/verify.sh
 ```
 
-This script runs a checklist of pass/fail/skip tests across six categories: core tools (Homebrew, Git, git config), shell (zsh default, .zshrc exists), SSH (directory permissions, key permissions, GitHub connectivity), GPG (key presence), development tools (node, npm, python3, pip3, code, cursor with version numbers), directory structure (~/Developer tree, Screenshots folder), and cloud configs (AWS, Kubernetes, Docker).
+This script runs a comprehensive checklist across nine categories: core tools (Homebrew, Git, git config), shell (zsh default, .zshrc exists), SSH (directory permissions, key permissions, GitHub connectivity test), GPG (key presence), development tools (node, npm, python3, pip3, code, cursor with version numbers), Homebrew health (formula/cask counts, checks for expected packages like git, gh, node, imagemagick and expected casks like visual-studio-code, cursor, docker, ghostty), directory structure (~/Developer tree, Screenshots folder), macOS settings (screenshot location, file extensions visible), cloud configs (AWS, Kubernetes, Docker), key applications (checks /Applications for expected apps), and Steam/CrossOver status (installed games, bottle counts).
 
 Each check is either a pass (green checkmark), fail (red X), or skip (blue info, for tools that weren't in the backup). At the end it prints a scorecard. Any failures indicate something that needs manual attention — the most common being GitHub SSH authentication, which requires adding your SSH public key to GitHub after restoring it to the new machine.
 
@@ -302,13 +334,13 @@ The backup does not capture passwords from Keychain, browser saved passwords, or
 
 ## Customization
 
-**Adding dotfiles:** Edit the `DOTFILES` array in `scripts/backup.sh`. Any file or directory in `~` can be added.
+**Adding dotfiles:** Edit the `PRIORITY_DOTFILES` array in `scripts/backup.sh`. The script also auto-discovers any dotfiles in `~/` not in the list, so this is mainly for prioritization.
 
-**Adding project search locations:** Edit the `SEARCH_DIRS` array in `scripts/backup.sh`.
+**Adding app cask mappings:** Edit the `CASK_MAP` associative array in backup.sh to add brew cask names for apps. This is how the script knows that "Ghostty.app" maps to `brew install --cask ghostty`.
 
 **Adding app settings:** Follow the existing pattern in Phase 3 of backup.sh — check if the app's config directory exists, create a subdirectory in the backup, and copy the relevant files.
 
-**Changing the Developer/ layout:** Edit Step 1 in `scripts/restore.sh` to create different subdirectories. Update Step 5 to change where projects are restored to.
+**Changing the Developer/ layout:** Edit Step 1 in `scripts/restore.sh` to create different subdirectories. Update Step 10 to change where projects are restored to.
 
 **Skipping sections:** Every section prompts for confirmation. Answer "n" to skip anything you don't need.
 
