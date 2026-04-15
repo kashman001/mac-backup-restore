@@ -537,6 +537,45 @@ if [ -d "$HOME/Library/Mobile Documents/com~apple~CloudDocs" ]; then
     echo ""
 fi
 
+# Sweep screenshots from Desktop (and other locations) into organized structure
+# macOS names them: "Screenshot YYYY-MM-DD at H.MM.SS AM.png"
+info "Scanning for screenshots..."
+SCREENSHOTS_DIR="$FILES/Screenshots"
+mkdir -p "$SCREENSHOTS_DIR"
+SCREENSHOT_COUNT=0
+
+for search_dir in "$HOME/Desktop" "$HOME/Documents" "$HOME/Downloads"; do
+    [ -d "$search_dir" ] || continue
+    find "$search_dir" -maxdepth 2 -name "Screenshot *.png" -type f 2>/dev/null | while read -r screenshot; do
+        fname=$(basename "$screenshot")
+        # Parse date from "Screenshot YYYY-MM-DD at ..."
+        if [[ "$fname" =~ ^Screenshot\ ([0-9]{4})-([0-9]{2})-([0-9]{2}) ]]; then
+            year="${BASH_REMATCH[1]}"
+            month="${BASH_REMATCH[2]}"
+            mkdir -p "$SCREENSHOTS_DIR/$year/$month"
+            cp -a "$screenshot" "$SCREENSHOTS_DIR/$year/$month/" 2>/dev/null
+        else
+            # Non-standard name, put in unsorted
+            mkdir -p "$SCREENSHOTS_DIR/unsorted"
+            cp -a "$screenshot" "$SCREENSHOTS_DIR/unsorted/" 2>/dev/null
+        fi
+    done
+done
+
+SCREENSHOT_COUNT=$(find "$SCREENSHOTS_DIR" -type f -name "*.png" 2>/dev/null | wc -l | tr -d ' ')
+if [ "$SCREENSHOT_COUNT" -gt 0 ]; then
+    log "Organized $SCREENSHOT_COUNT screenshots by date into backup"
+    # Show the year/month breakdown
+    find "$SCREENSHOTS_DIR" -mindepth 2 -maxdepth 2 -type d 2>/dev/null | sort | while read -r ym; do
+        count=$(find "$ym" -type f 2>/dev/null | wc -l | tr -d ' ')
+        rel="${ym#$SCREENSHOTS_DIR/}"
+        log "  $rel: $count screenshots"
+    done
+else
+    info "No screenshots found"
+fi
+echo ""
+
 for dir in "$HOME/Documents" "$HOME/Desktop" "$HOME/Downloads" "$HOME/Pictures" "$HOME/Music" "$HOME/Movies"; do
     name=$(basename "$dir")
     [ -d "$dir" ] && [ "$(ls -A "$dir" 2>/dev/null)" ] || continue

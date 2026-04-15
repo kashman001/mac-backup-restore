@@ -446,7 +446,29 @@ if [ -d "$OBSIDIAN_SRC" ]; then
     }
 fi
 
-# ── Step 10: Projects → ~/Developer/ ─────────────────────────────────────────
+# ── Step 10: Screenshots → ~/Pictures/Screenshots/YYYY/MM/ ──────────────────
+phase "Screenshots"
+
+SCREENSHOTS_SRC="$BACKUP/files/Screenshots"
+if [ -d "$SCREENSHOTS_SRC" ] && [ "$(find "$SCREENSHOTS_SRC" -type f 2>/dev/null | head -1)" ]; then
+    SCREENSHOT_COUNT=$(find "$SCREENSHOTS_SRC" -type f -name "*.png" 2>/dev/null | wc -l | tr -d ' ')
+    info "Found $SCREENSHOT_COUNT screenshots organized by date in backup:"
+    find "$SCREENSHOTS_SRC" -mindepth 2 -maxdepth 2 -type d 2>/dev/null | sort | while read -r ym; do
+        count=$(find "$ym" -type f 2>/dev/null | wc -l | tr -d ' ')
+        rel="${ym#$SCREENSHOTS_SRC/}"
+        log "  $rel: $count screenshots"
+    done
+    echo ""
+    confirm "Restore screenshots to ~/Pictures/Screenshots/?" && {
+        rsync -a "$SCREENSHOTS_SRC/" "$HOME/Pictures/Screenshots/" 2>/dev/null
+        log "Screenshots restored to ~/Pictures/Screenshots/"
+        info "macOS is already configured to save new screenshots here"
+    }
+else
+    info "No screenshots found in backup"
+fi
+
+# ── Step 11: Projects → ~/Developer/ ────────────────────────────────────────
 phase "Projects → Clean Layout"
 
 PROJ_SRC="$BACKUP/projects"
@@ -498,7 +520,7 @@ else
     info "No projects found in backup"
 fi
 
-# ── Step 11: Personal Files ──────────────────────────────────────────────────
+# ── Step 12: Personal Files ──────────────────────────────────────────────────
 phase "Personal Files"
 
 info "Note: if you sign into iCloud, Documents and Desktop will sync automatically."
@@ -518,7 +540,7 @@ if [ -d "$FILES_SRC" ]; then
     done
 fi
 
-# ── Step 12: Anaconda / Conda Environments ───────────────────────────────────
+# ── Step 13: Anaconda / Conda Environments ───────────────────────────────────
 phase "Python & Conda"
 
 CONDA_ENVS="$BACKUP/software-inventory/conda-envs"
@@ -557,7 +579,7 @@ if [ -f "$NPM_FILE" ] && has npm; then
     }
 fi
 
-# ── Step 13: System Config ───────────────────────────────────────────────────
+# ── Step 14: System Config ───────────────────────────────────────────────────
 phase "System Config"
 
 SYS_SRC="$BACKUP/system"
