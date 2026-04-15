@@ -227,7 +227,9 @@ if [ -d "$STEAM_DIR/steamapps" ]; then
         appid=$(grep '"appid"' "$manifest" | grep -o '[0-9]*')
         name=$(grep '"name"' "$manifest" | sed 's/.*"\(.*\)"/\1/' | tail -1)
         size=$(grep '"SizeOnDisk"' "$manifest" | grep -o '[0-9]*')
-        size_human=$(numfmt --to=iec "$size" 2>/dev/null || echo "${size}B")
+        size_human=$(numfmt --to=iec "$size" 2>/dev/null || \
+            awk "BEGIN{s=$size; u=\"BKMGT\"; for(i=0;s>=1024&&i<4;i++)s/=1024; printf \"%.0f%s\",s,substr(u,i+1,1)}" 2>/dev/null || \
+            echo "${size}B")
         echo "$appid | $name | $size_human" >> "$STEAM_LIST"
     done
 
@@ -542,7 +544,6 @@ fi
 info "Scanning for screenshots..."
 SCREENSHOTS_DIR="$FILES/Screenshots"
 mkdir -p "$SCREENSHOTS_DIR"
-SCREENSHOT_COUNT=0
 
 for search_dir in "$HOME/Desktop" "$HOME/Documents" "$HOME/Downloads"; do
     [ -d "$search_dir" ] || continue

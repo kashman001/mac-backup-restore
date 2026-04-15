@@ -532,6 +532,8 @@ if [ -d "$FILES_SRC" ]; then
     for dir in "$FILES_SRC"/*/; do
         [ -d "$dir" ] || continue
         name=$(basename "$dir")
+        # Screenshots already handled in Step 10
+        [ "$name" = "Screenshots" ] && continue
         SIZE=$(du -sh "$dir" 2>/dev/null | cut -f1)
         confirm "Restore $name ($SIZE)?" && {
             rsync -a "$dir" "$HOME/$name/" 2>/dev/null

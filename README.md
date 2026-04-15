@@ -125,6 +125,12 @@ When you run backup.sh, it creates a timestamped directory on the external drive
 │   └── <original-path>/         ← project files, mirroring home directory structure
 │       └── <project-name>/          (node_modules, .venv, build dirs excluded)
 ├── files/
+│   ├── Screenshots/             ← organized from Desktop clutter into YYYY/MM/
+│   │   ├── 2025/
+│   │   │   ├── 01/
+│   │   │   ├── 06/
+│   │   │   └── ...
+│   │   └── unsorted/            ← screenshots with non-standard filenames
 │   ├── Documents/
 │   ├── Desktop/
 │   ├── Downloads/
@@ -241,7 +247,7 @@ The script assumes an organic, adhoc setup — software installed through a mix 
 
 **Phase 4 — Project Discovery.** Scans the entire home directory up to 5 levels deep for `.git` directories, excluding Library, Trash, node_modules, anaconda3, and virtual environments. Also scans for orphan code files (`.py`, `.ipynb`, `.js`, `.sh`, etc.) that aren't inside any git repo and logs them separately.
 
-**Phase 5 — Personal Files.** Warns about iCloud offloading (files may be stubs if Desktop & Documents sync is enabled). Iterates through Documents, Desktop, Downloads, Pictures, Music, and Movies with size and confirmation prompts. Excludes stale IDE workspace metadata.
+**Phase 5 — Personal Files.** Warns about iCloud offloading (files may be stubs if Desktop & Documents sync is enabled). Sweeps screenshots from Desktop, Documents, and Downloads, parsing dates from the macOS naming convention (`Screenshot YYYY-MM-DD at H.MM.SS AM.png`) and organizing them into `Screenshots/YYYY/MM/` folders — non-standard filenames go to `Screenshots/unsorted/`. Then iterates through Documents, Desktop, Downloads, Pictures, Music, and Movies with size and confirmation prompts.
 
 **Phase 6 — System Config.** Captures crontab and Launch Agents.
 
@@ -296,13 +302,15 @@ The restore strategy is: install everything possible through Homebrew (even apps
 
 **Step 9 — Application Settings.** Restores settings for VS Code, Cursor, Ghostty, iTerm2, Warp, and Obsidian. Installs VS Code and Cursor extensions in parallel.
 
-**Step 10 — Projects.** Flattens all backed-up projects (regardless of where they were scattered on the old Mac) into `~/Developer/personal/`. Shows where they originally came from. Flags orphan code files that weren't in any git repo.
+**Step 10 — Screenshots.** Restores the date-organized screenshots into `~/Pictures/Screenshots/YYYY/MM/`. Shows a count and year/month breakdown before prompting. Since Step 0 already configured macOS to save new screenshots here, everything ends up in one place going forward.
 
-**Step 11 — Personal Files.** Notes that iCloud will re-sync Documents and Desktop automatically. Restores from backup as supplemental insurance.
+**Step 11 — Projects.** Flattens all backed-up projects (regardless of where they were scattered on the old Mac) into `~/Developer/personal/`. Shows where they originally came from. Flags orphan code files that weren't in any git repo.
 
-**Step 12 — Python & Conda.** Recreates conda environments from exported YAML files. Reinstalls npm globals. This is last because it depends on runtimes from Step 2.
+**Step 12 — Personal Files.** Notes that iCloud will re-sync Documents and Desktop automatically. Restores from backup as supplemental insurance. Skips the Screenshots directory (already handled in Step 10).
 
-**Step 13 — System Config.** Restores crontab and Launch Agents.
+**Step 13 — Python & Conda.** Recreates conda environments from exported YAML files. Reinstalls npm globals. This is late because it depends on runtimes from Step 2.
+
+**Step 14 — System Config.** Restores crontab and Launch Agents.
 
 Finishes with a summary including any manual TODO items that accumulated, plus recommended next steps.
 
@@ -316,7 +324,7 @@ Run this on the new Mac after restore.sh completes.
 ./scripts/verify.sh
 ```
 
-This script runs a comprehensive checklist across nine categories: core tools (Homebrew, Git, git config), shell (zsh default, .zshrc exists), SSH (directory permissions, key permissions, GitHub connectivity test), GPG (key presence), development tools (node, npm, python3, pip3, code, cursor with version numbers), Homebrew health (formula/cask counts, checks for expected packages like git, gh, node, imagemagick and expected casks like visual-studio-code, cursor, docker, ghostty), directory structure (~/Developer tree, Screenshots folder), macOS settings (screenshot location, file extensions visible), cloud configs (AWS, Kubernetes, Docker), key applications (checks /Applications for expected apps), and Steam/CrossOver status (installed games, bottle counts).
+This script runs a comprehensive checklist across ten categories: core tools (Homebrew, Git, git config), shell (zsh default, .zshrc exists), SSH (directory permissions, key permissions, GitHub connectivity test), GPG (key presence), development tools (node, npm, python3, pip3, code, cursor with version numbers), Homebrew health (formula/cask counts, checks for expected packages like git, gh, node, imagemagick and expected casks like visual-studio-code, cursor, docker, ghostty), directory structure (~/Developer tree, Screenshots folder, screenshot file count and year-directory organization), macOS settings (screenshot location, file extensions visible), cloud configs (AWS, Kubernetes, Docker), key applications (checks /Applications for expected apps), and Steam/CrossOver status (installed games, bottle counts).
 
 Each check is either a pass (green checkmark), fail (red X), or skip (blue info, for tools that weren't in the backup). At the end it prints a scorecard. Any failures indicate something that needs manual attention — the most common being GitHub SSH authentication, which requires adding your SSH public key to GitHub after restoring it to the new machine.
 
@@ -340,7 +348,9 @@ The backup does not capture passwords from Keychain, browser saved passwords, or
 
 **Adding app settings:** Follow the existing pattern in Phase 3 of backup.sh — check if the app's config directory exists, create a subdirectory in the backup, and copy the relevant files.
 
-**Changing the Developer/ layout:** Edit Step 1 in `scripts/restore.sh` to create different subdirectories. Update Step 10 to change where projects are restored to.
+**Changing the Developer/ layout:** Edit Step 1 in `scripts/restore.sh` to create different subdirectories. Update Step 11 to change where projects are restored to.
+
+**Adding screenshot scan locations:** Edit the `for search_dir in ...` loop in Phase 5 of backup.sh to add directories beyond Desktop, Documents, and Downloads.
 
 **Skipping sections:** Every section prompts for confirmation. Answer "n" to skip anything you don't need.
 

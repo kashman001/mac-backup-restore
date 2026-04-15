@@ -165,6 +165,19 @@ check "~/Developer/oss exists" "[ -d ~/Developer/oss ]"
 check "~/Developer/experiments exists" "[ -d ~/Developer/experiments ]"
 check "~/Pictures/Screenshots exists" "[ -d ~/Pictures/Screenshots ]"
 
+# Screenshots
+SCREENSHOT_FILES=$(find ~/Pictures/Screenshots -type f -name "*.png" 2>/dev/null | wc -l | tr -d ' ')
+if [ "$SCREENSHOT_FILES" -gt 0 ]; then
+    info "$SCREENSHOT_FILES screenshots in ~/Pictures/Screenshots"
+    YEAR_DIRS=$(find ~/Pictures/Screenshots -mindepth 1 -maxdepth 1 -type d -name "[0-9]*" 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$YEAR_DIRS" -gt 0 ]; then
+        log "Screenshots organized into $YEAR_DIRS year directories"
+        ((PASS++))
+    fi
+else
+    info "No screenshots in ~/Pictures/Screenshots (may not have been restored)"
+fi
+
 # Count projects
 if [ -d "$HOME/Developer" ]; then
     PROJ_COUNT=$(find ~/Developer -maxdepth 3 -name ".git" -type d 2>/dev/null | wc -l | tr -d ' ')
