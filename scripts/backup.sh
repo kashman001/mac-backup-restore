@@ -193,7 +193,154 @@ has code   && code --list-extensions > "$INV/vscode-extensions.txt" 2>/dev/null 
 has cursor && cursor --list-extensions > "$INV/cursor-extensions.txt" 2>/dev/null && log "Cursor extensions"
 [ -d "$HOME/go/bin" ] && ls "$HOME/go/bin" > "$INV/go-binaries.txt" 2>/dev/null && log "Go binaries"
 
-# ── 1g. Anaconda environments
+# ── 1g. Browser Extensions ───────────────────────────────────────────────────
+info "Scanning browser extensions..."
+mkdir -p "$INV/browser-extensions"
+
+# Helper: extract Chromium extension names from manifest.json files
+_scan_chromium_extensions() {
+    local browser_name="$1" ext_dir="$2" outfile="$3"
+    [ -d "$ext_dir" ] || return 1
+    > "$outfile"
+    for ext_id_dir in "$ext_dir"/*/; do
+        [ -d "$ext_id_dir" ] || continue
+        ext_id=$(basename "$ext_id_dir")
+        # Skip Chrome internal extensions directory
+        [ "$ext_id" = "Temp" ] && continue
+        # Find the latest version's manifest.json
+        manifest=$(find "$ext_id_dir" -maxdepth 2 -name "manifest.json" -type f 2>/dev/null | head -1)
+        if [ -n "$manifest" ] && [ -f "$manifest" ]; then
+            name=$(python3 -c "
+import json, sys
+try:
+    m = json.load(open('$manifest'))
+    n = m.get('name', '$ext_id')
+    # Skip Chrome internal MSG references that need locale lookup
+    if n.startswith('__MSG_'):
+        n = m.get('short_name', n)
+    if n.startswith('__MSG_'):
+        n = '$ext_id'
+    print(n)
+except: print('$ext_id')
+" 2>/dev/null)
+            version=$(python3 -c "
+import json
+try: print(json.load(open('$manifest')).get('version','?'))
+except: print('?')
+" 2>/dev/null)
+            echo "$ext_id | $name | $version" >> "$outfile"
+        else
+            echo "$ext_id | (unknown) |" >> "$outfile"
+        fi
+    done
+    if [ -s "$outfile" ]; then
+        count=$(wc -l < "$outfile" | tr -d ' ')
+        log "$browser_name extensions ($count)"
+        return 0
+    fi
+    return 1
+}
+
+# Chrome
+CHROME_EXT="$HOME/Library/Application Support/Google/Chrome/Default/Extensions"
+_scan_chromium_extensions "Chrome" "$CHROME_EXT" "$INV/browser-extensions/chrome-extensions.txt" || \
+    info "No Chrome extensions found"
+
+# Chrome profiles beyond Default
+for profile_dir in "$HOME/Library/Application Support/Google/Chrome"/Profile\ *; do
+    [ -d "$profile_dir/Extensions" ] || continue
+    pname=$(basename "$profile_dir")
+    _scan_chromium_extensions "Chrome ($pname)" "$profile_dir/Extensions" \
+        "$INV/browser-extensions/chrome-${pname// /-}-extensions.txt" 2>/dev/null
+done
+
+# Arc (Chromium-based)
+ARC_EXT="$HOME/Library/Application Support/Arc/User Data/Default/Extensions"
+_scan_chromium_extensions "Arc" "$ARC_EXT" "$INV/browser-extensions/arc-extensions.txt" || \
+    info "No Arc extensions found"
+
+# Opera (Chromium-based)
+OPERA_EXT="$HOME/Library/Application Support/com.operasoftware.Opera/Extensions"
+_scan_chromium_extensions "Opera" "$OPERA_EXT" "$INV/browser-extensions/opera-extensions.txt" || \
+    info "No Opera extensions found"
+
+# Safari extensions (from preferences)
+SAFARI_PREFS="$HOME/Library/Preferences/com.apple.Safari.plist"
+if [ -f "$SAFARI_PREFS" ]; then
+    SAFARI_OUT="$INV/browser-extensions/safari-extensions.txt"
+    # Safari extensions are App Extensions — list them from pluginkit
+    pluginkit -mA 2>/dev/null | grep -i safari > "$SAFARI_OUT" 2>/dev/null
+    # Also try to get extension names from Safari preferences
+    defaults read com.apple.Safari 2>/dev/null | grep -A2 "Enabled Extensions" >> "$SAFARI_OUT" 2>/dev/null
+    if [ -s "$SAFARI_OUT" ]; then
+        log "Safari extensions"
+    else
+        rm -f "$SAFARI_OUT"
+        info "No Safari extensions detected"
+    fi
+fi
+
+# Remove empty browser-extensions dir if nothing was found
+rmdir "$INV/browser-extensions" 2>/dev/null || true
+
+# ── 1h. Application Plugins ──────────────────────────────────────────────────
+info "Scanning application plugins..."
+mkdir -p "$INV/app-plugins"
+
+# JetBrains / PyCharm plugins (user-installed, not built-in)
+PYCHARM_PLUGINS_DIR=$(find "$HOME/Library/Application Support/JetBrains" -maxdepth 2 -path "*/PyCharm*/plugins" -type d 2>/dev/null | sort -V | tail -1)
+if [ -n "$PYCHARM_PLUGINS_DIR" ] && [ -d "$PYCHARM_PLUGINS_DIR" ]; then
+    PYCHARM_PLUGIN_LIST="$INV/app-plugins/pycharm-plugins.txt"
+    ls -1 "$PYCHARM_PLUGINS_DIR" > "$PYCHARM_PLUGIN_LIST" 2>/dev/null
+    if [ -s "$PYCHARM_PLUGIN_LIST" ]; then
+        count=$(wc -l < "$PYCHARM_PLUGIN_LIST" | tr -d ' ')
+        log "PyCharm user plugins ($count)"
+    fi
+fi
+
+# Also check for other JetBrains IDEs (IntelliJ, WebStorm, GoLand, etc.)
+for ide_dir in "$HOME/Library/Application Support/JetBrains"/*/; do
+    [ -d "$ide_dir/plugins" ] || continue
+    ide_name=$(basename "$ide_dir")
+    # Skip PyCharm (already handled) and non-IDE dirs
+    echo "$ide_name" | grep -qi "pycharm" && continue
+    PLUGIN_LIST="$INV/app-plugins/${ide_name}-plugins.txt"
+    ls -1 "$ide_dir/plugins" > "$PLUGIN_LIST" 2>/dev/null
+    if [ -s "$PLUGIN_LIST" ]; then
+        count=$(wc -l < "$PLUGIN_LIST" | tr -d ' ')
+        log "$ide_name user plugins ($count)"
+    else
+        rm -f "$PLUGIN_LIST"
+    fi
+done
+
+# Obsidian community plugins (scan known vault locations)
+OBSIDIAN_VAULTS_FOUND=0
+OBSIDIAN_PLUGIN_DIR="$INV/app-plugins/obsidian"
+for search_dir in "$HOME/Documents" "$HOME/Desktop" "$HOME" "$HOME/Library/Mobile Documents/iCloud~md~obsidian/Documents"; do
+    [ -d "$search_dir" ] || continue
+    find "$search_dir" -maxdepth 4 -path "*/.obsidian/plugins" -type d \
+        -not -path "*/Library/*" \
+        -not -path "*/.Trash/*" \
+        2>/dev/null | while read -r plugins_dir; do
+            vault_dir=$(dirname "$(dirname "$plugins_dir")")
+            vault_name=$(basename "$vault_dir")
+            mkdir -p "$OBSIDIAN_PLUGIN_DIR"
+            VAULT_PLUGINS="$OBSIDIAN_PLUGIN_DIR/${vault_name}-plugins.txt"
+            ls -1 "$plugins_dir" > "$VAULT_PLUGINS" 2>/dev/null
+            if [ -s "$VAULT_PLUGINS" ]; then
+                count=$(wc -l < "$VAULT_PLUGINS" | tr -d ' ')
+                log "Obsidian vault '$vault_name' plugins ($count)"
+            else
+                rm -f "$VAULT_PLUGINS"
+            fi
+    done
+done
+
+# Remove empty app-plugins dir if nothing was found
+find "$INV/app-plugins" -type d -empty -delete 2>/dev/null || true
+
+# ── 1i. Anaconda environments
 if has conda; then
     conda env list > "$INV/conda-environments.txt" 2>/dev/null && log "Conda environments"
     # Export each environment
@@ -213,7 +360,7 @@ elif [ -d "$HOME/anaconda3" ] || [ -d "/opt/homebrew/anaconda3" ]; then
     info "  Activate conda first: eval \"\$(conda shell.bash hook)\""
 fi
 
-# ── 1h. Steam games
+# ── 1j. Steam games
 phase "Steam Games"
 STEAM_DIR="$HOME/Library/Application Support/Steam"
 if [ -d "$STEAM_DIR/steamapps" ]; then
@@ -265,7 +412,7 @@ else
     info "No Steam installation found"
 fi
 
-# ── 1i. CrossOver bottles
+# ── 1k. CrossOver bottles
 CROSSOVER_BOTTLES="$HOME/Library/Application Support/CrossOver/Bottles"
 if [ -d "$CROSSOVER_BOTTLES" ]; then
     info "CrossOver bottles found:"

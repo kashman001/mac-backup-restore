@@ -111,10 +111,12 @@ for tool in node npm python3 pip3; do
     fi
 done
 
-# Editors
+# Editors and their extensions
 for editor in code cursor; do
     if has "$editor"; then
         check "$editor CLI available" "has $editor"
+        EXT_COUNT=$($editor --list-extensions 2>/dev/null | wc -l | tr -d ' ')
+        info "  $editor: $EXT_COUNT extensions installed"
     fi
 done
 
@@ -240,6 +242,30 @@ for app in "${EXPECTED_APPS[@]}"; do
         ((FAIL++))
     fi
 done
+
+# ── Browser Extensions & App Plugins ─────────────────────────────────────────
+phase "Extensions & Plugins"
+
+# Chrome extensions
+CHROME_EXT="$HOME/Library/Application Support/Google/Chrome/Default/Extensions"
+if [ -d "$CHROME_EXT" ]; then
+    CHROME_COUNT=$(ls -1d "$CHROME_EXT"/*/ 2>/dev/null | wc -l | tr -d ' ')
+    info "Chrome: $CHROME_COUNT extensions installed"
+fi
+
+# Arc extensions
+ARC_EXT="$HOME/Library/Application Support/Arc/User Data/Default/Extensions"
+if [ -d "$ARC_EXT" ]; then
+    ARC_COUNT=$(ls -1d "$ARC_EXT"/*/ 2>/dev/null | wc -l | tr -d ' ')
+    info "Arc: $ARC_COUNT extensions installed"
+fi
+
+# PyCharm plugins
+PYCHARM_PLUGINS=$(find "$HOME/Library/Application Support/JetBrains" -maxdepth 2 -path "*/PyCharm*/plugins" -type d 2>/dev/null | sort -V | tail -1)
+if [ -n "$PYCHARM_PLUGINS" ] && [ -d "$PYCHARM_PLUGINS" ]; then
+    PC_COUNT=$(ls -1 "$PYCHARM_PLUGINS" 2>/dev/null | wc -l | tr -d ' ')
+    info "PyCharm: $PC_COUNT user plugins installed"
+fi
 
 # ── Steam ────────────────────────────────────────────────────────────────────
 phase "Steam & Games"

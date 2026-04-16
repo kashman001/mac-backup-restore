@@ -446,7 +446,65 @@ if [ -d "$OBSIDIAN_SRC" ]; then
     }
 fi
 
-# ── Step 10: Screenshots → ~/Pictures/Screenshots/YYYY/MM/ ──────────────────
+# ── Step 10: Browser Extensions & App Plugins ──────────────────────────────
+phase "Browser Extensions & App Plugins"
+
+BROWSER_EXT="$BACKUP/software-inventory/browser-extensions"
+if [ -d "$BROWSER_EXT" ] && [ "$(ls -A "$BROWSER_EXT" 2>/dev/null)" ]; then
+    info "Browser extensions from your old Mac:"
+    echo ""
+    for ext_file in "$BROWSER_EXT"/*-extensions.txt; do
+        [ -f "$ext_file" ] || continue
+        browser=$(basename "$ext_file" -extensions.txt | sed 's/-/ /g; s/\b\(.\)/\u\1/g')
+        count=$(wc -l < "$ext_file" | tr -d ' ')
+        info "$browser ($count extensions):"
+        while IFS='|' read -r eid name version; do
+            name=$(echo "$name" | xargs)
+            [ -n "$name" ] && echo "    $name"
+        done < "$ext_file"
+        echo ""
+    done
+    warn "Browser extensions cannot be installed automatically."
+    info "Sign into each browser to sync extensions, or reinstall from the lists above."
+    info "Extension lists saved at: $BROWSER_EXT/"
+    echo "  - Reinstall browser extensions (see $BROWSER_EXT/)" >> "$MANUAL_TODO"
+else
+    info "No browser extension data found in backup"
+fi
+
+APP_PLUGINS="$BACKUP/software-inventory/app-plugins"
+if [ -d "$APP_PLUGINS" ] && [ "$(ls -A "$APP_PLUGINS" 2>/dev/null)" ]; then
+    echo ""
+    info "Application plugins from your old Mac:"
+
+    # PyCharm / JetBrains plugins
+    for plugin_file in "$APP_PLUGINS"/*-plugins.txt; do
+        [ -f "$plugin_file" ] || continue
+        ide_name=$(basename "$plugin_file" -plugins.txt)
+        count=$(wc -l < "$plugin_file" | tr -d ' ')
+        info "$ide_name plugins ($count):"
+        cat "$plugin_file" | sed 's/^/    /'
+        echo ""
+    done
+
+    # Obsidian vault plugins
+    if [ -d "$APP_PLUGINS/obsidian" ]; then
+        for vault_file in "$APP_PLUGINS/obsidian"/*-plugins.txt; do
+            [ -f "$vault_file" ] || continue
+            vault_name=$(basename "$vault_file" -plugins.txt)
+            count=$(wc -l < "$vault_file" | tr -d ' ')
+            info "Obsidian vault '$vault_name' plugins ($count):"
+            cat "$vault_file" | sed 's/^/    /'
+            echo ""
+        done
+        info "Obsidian community plugins will be restored with your vault data"
+    fi
+
+    warn "JetBrains plugins: open Settings → Plugins in each IDE to reinstall"
+    echo "  - Reinstall JetBrains IDE plugins (see plugin lists in backup)" >> "$MANUAL_TODO"
+fi
+
+# ── Step 11: Screenshots → ~/Pictures/Screenshots/YYYY/MM/ ──────────────────
 phase "Screenshots"
 
 SCREENSHOTS_SRC="$BACKUP/files/Screenshots"
@@ -468,7 +526,7 @@ else
     info "No screenshots found in backup"
 fi
 
-# ── Step 11: Projects → ~/Developer/ ────────────────────────────────────────
+# ── Step 12: Projects → ~/Developer/ ────────────────────────────────────────
 phase "Projects → Clean Layout"
 
 PROJ_SRC="$BACKUP/projects"
@@ -520,7 +578,7 @@ else
     info "No projects found in backup"
 fi
 
-# ── Step 12: Personal Files ──────────────────────────────────────────────────
+# ── Step 13: Personal Files ──────────────────────────────────────────────────
 phase "Personal Files"
 
 info "Note: if you sign into iCloud, Documents and Desktop will sync automatically."
@@ -542,7 +600,7 @@ if [ -d "$FILES_SRC" ]; then
     done
 fi
 
-# ── Step 13: Anaconda / Conda Environments ───────────────────────────────────
+# ── Step 14: Anaconda / Conda Environments ───────────────────────────────────
 phase "Python & Conda"
 
 CONDA_ENVS="$BACKUP/software-inventory/conda-envs"
@@ -581,7 +639,7 @@ if [ -f "$NPM_FILE" ] && has npm; then
     }
 fi
 
-# ── Step 14: System Config ───────────────────────────────────────────────────
+# ── Step 15: System Config ───────────────────────────────────────────────────
 phase "System Config"
 
 SYS_SRC="$BACKUP/system"

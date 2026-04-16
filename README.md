@@ -96,6 +96,16 @@ When you run backup.sh, it creates a timestamped directory on the external drive
 │   ├── cursor-extensions.txt    ← Cursor extension IDs
 │   ├── conda-environments.txt   ← list of Anaconda environments
 │   ├── conda-envs/              ← exported conda environment YAML files
+│   ├── browser-extensions/      ← browser extension inventories
+│   │   ├── chrome-extensions.txt    ← Chrome extensions (ID, name, version)
+│   │   ├── arc-extensions.txt       ← Arc browser extensions
+│   │   ├── opera-extensions.txt     ← Opera extensions
+│   │   └── safari-extensions.txt    ← Safari extensions
+│   ├── app-plugins/             ← application plugin inventories
+│   │   ├── pycharm-plugins.txt      ← PyCharm user-installed plugins
+│   │   ├── <IDE>-plugins.txt        ← other JetBrains IDE plugins
+│   │   └── obsidian/
+│   │       └── <vault>-plugins.txt  ← community plugins per vault
 │   └── steam/
 │       ├── installed-games.txt  ← Steam games installed on this Mac
 │       ├── crossover-games.txt  ← Windows games running via CrossOver
@@ -239,7 +249,7 @@ If you run it without arguments, it prints available volumes to help you find yo
 
 The script assumes an organic, adhoc setup — software installed through a mix of Homebrew, Mac App Store, direct downloads, standalone .pkg installers, JetBrains Toolbox, Docker Desktop, and CrossOver. It scans everything and classifies what it finds.
 
-**Phase 1 — Software Inventory.** Generates a Brewfile via `brew bundle dump`. Lists all apps in /Applications, then classifies each one by install source (Homebrew cask, Mac App Store, manual download, macOS-bundled) using a built-in mapping table. For manual installs, it checks if a Homebrew cask exists and generates a `Brewfile.addon` — this is what lets the restore convert manual installs to Homebrew. Also captures /usr/local/bin (standalone tools like Docker CLIs), package lists from npm, pip3, pipx, cargo, gem, Go, and extension lists from VS Code and Cursor. Exports Anaconda/conda environments as YAML files for recreation on the new Mac. Scans Steam for installed games (parsing appmanifest .acf files) and CrossOver game launchers (parsing Desktop .app bundles that call `steam://run/`).
+**Phase 1 — Software Inventory.** Generates a Brewfile via `brew bundle dump`. Lists all apps in /Applications, then classifies each one by install source (Homebrew cask, Mac App Store, manual download, macOS-bundled) using a built-in mapping table. For manual installs, it checks if a Homebrew cask exists and generates a `Brewfile.addon` — this is what lets the restore convert manual installs to Homebrew. Also captures /usr/local/bin (standalone tools like Docker CLIs), package lists from npm, pip3, pipx, cargo, gem, Go, and extension lists from VS Code and Cursor. Scans browser extensions across Chrome, Arc, Opera, and Safari by parsing Chromium manifest.json files to extract human-readable names and versions. Captures application plugins including PyCharm/JetBrains user-installed plugins and Obsidian community plugins per vault. Exports Anaconda/conda environments as YAML files for recreation on the new Mac. Scans Steam for installed games (parsing appmanifest .acf files) and CrossOver game launchers (parsing Desktop .app bundles that call `steam://run/`).
 
 **Phase 2 — Dotfiles & Config.** Instead of only copying a hardcoded list, it first grabs known priority dotfiles, then scans `~/` for any additional dotfiles it didn't predict. This catches organic configs that accumulate over time. Also backs up SSH, GPG, ~/.config, and cloud credentials (AWS, Kubernetes, Docker).
 
@@ -302,15 +312,17 @@ The restore strategy is: install everything possible through Homebrew (even apps
 
 **Step 9 — Application Settings.** Restores settings for VS Code, Cursor, Ghostty, iTerm2, Warp, and Obsidian. Installs VS Code and Cursor extensions in parallel.
 
-**Step 10 — Screenshots.** Restores the date-organized screenshots into `~/Pictures/Screenshots/YYYY/MM/`. Shows a count and year/month breakdown before prompting. Since Step 0 already configured macOS to save new screenshots here, everything ends up in one place going forward.
+**Step 10 — Browser Extensions & App Plugins.** Displays the full inventory of browser extensions (Chrome, Arc, Opera, Safari) with human-readable names, and lists JetBrains IDE plugins and Obsidian community plugins. Browser extensions can't be auto-installed — this step provides the reference lists so you can reinstall them after signing into each browser, or use browser sync. JetBrains plugins need to be reinstalled via each IDE's Settings → Plugins.
 
-**Step 11 — Projects.** Flattens all backed-up projects (regardless of where they were scattered on the old Mac) into `~/Developer/personal/`. Shows where they originally came from. Flags orphan code files that weren't in any git repo.
+**Step 11 — Screenshots.** Restores the date-organized screenshots into `~/Pictures/Screenshots/YYYY/MM/`. Shows a count and year/month breakdown before prompting. Since Step 0 already configured macOS to save new screenshots here, everything ends up in one place going forward.
 
-**Step 12 — Personal Files.** Notes that iCloud will re-sync Documents and Desktop automatically. Restores from backup as supplemental insurance. Skips the Screenshots directory (already handled in Step 10).
+**Step 12 — Projects.** Flattens all backed-up projects (regardless of where they were scattered on the old Mac) into `~/Developer/personal/`. Shows where they originally came from. Flags orphan code files that weren't in any git repo.
 
-**Step 13 — Python & Conda.** Recreates conda environments from exported YAML files. Reinstalls npm globals. This is late because it depends on runtimes from Step 2.
+**Step 13 — Personal Files.** Notes that iCloud will re-sync Documents and Desktop automatically. Restores from backup as supplemental insurance. Skips the Screenshots directory (already handled in Step 11).
 
-**Step 14 — System Config.** Restores crontab and Launch Agents.
+**Step 14 — Python & Conda.** Recreates conda environments from exported YAML files. Reinstalls npm globals. This is late because it depends on runtimes from Step 2.
+
+**Step 15 — System Config.** Restores crontab and Launch Agents.
 
 Finishes with a summary including any manual TODO items that accumulated, plus recommended next steps.
 
@@ -348,7 +360,7 @@ The backup does not capture passwords from Keychain, browser saved passwords, or
 
 **Adding app settings:** Follow the existing pattern in Phase 3 of backup.sh — check if the app's config directory exists, create a subdirectory in the backup, and copy the relevant files.
 
-**Changing the Developer/ layout:** Edit Step 1 in `scripts/restore.sh` to create different subdirectories. Update Step 11 to change where projects are restored to.
+**Changing the Developer/ layout:** Edit Step 1 in `scripts/restore.sh` to create different subdirectories. Update Step 12 to change where projects are restored to.
 
 **Adding screenshot scan locations:** Edit the `for search_dir in ...` loop in Phase 5 of backup.sh to add directories beyond Desktop, Documents, and Downloads.
 
