@@ -611,21 +611,148 @@ else
     info "No projects found in backup"
 fi
 
-# ── Step 14: Personal Files ──────────────────────────────────────────────────
+# ── Step 14: Personal Files (classified by data type) ───────────────────────
 phase "Personal Files"
 
-info "Note: if you sign into iCloud, Documents and Desktop will sync automatically."
-info "Restoring from backup is useful for files that weren't in iCloud."
+FILES_SRC="$BACKUP/files"
+
+# Show data classification if available
+DATA_CLASS="$FILES_SRC/_data-classification.txt"
+if [ -f "$DATA_CLASS" ]; then
+    echo ""
+    info "Your backup classified data into categories:"
+    echo ""
+
+    # Show stale data (multi-machine sync artifacts)
+    STALE_COUNT=$(grep -c "^STALE" "$DATA_CLASS" 2>/dev/null || echo 0)
+    if [ "$STALE_COUNT" -gt 0 ]; then
+        warn "Stale data (old device sync artifacts):"
+        grep "^STALE" "$DATA_CLASS" | while IFS='|' read -r tag name size; do
+            name=$(echo "$name" | xargs)
+            size=$(echo "$size" | xargs)
+            echo "    $name ($size)"
+        done
+        info "  Recommendation: skip these. They're from old Macs and will clutter the new one."
+        echo ""
+    fi
+
+    # Show archival data
+    ARCHIVAL_COUNT=$(grep -c "^ARCHIVAL" "$DATA_CLASS" 2>/dev/null || echo 0)
+    if [ "$ARCHIVAL_COUNT" -gt 0 ]; then
+        warn "Archival data (large, rarely accessed):"
+        grep "^ARCHIVAL" "$DATA_CLASS" | while IFS='|' read -r tag name size note; do
+            name=$(echo "$name" | xargs)
+            size=$(echo "$size" | xargs)
+            note=$(echo "$note" | xargs)
+            echo "    $name ($size) — $note"
+        done
+        info "  Recommendation: keep on external drive or move to cloud storage."
+        echo ""
+    fi
+
+    # Show app-generated data
+    APP_DATA_COUNT=$(grep -c "^APP-DATA" "$DATA_CLASS" 2>/dev/null || echo 0)
+    if [ "$APP_DATA_COUNT" -gt 0 ]; then
+        info "App-generated data:"
+        grep "^APP-DATA" "$DATA_CLASS" | while IFS='|' read -r tag name size note; do
+            name=$(echo "$name" | xargs)
+            size=$(echo "$size" | xargs)
+            echo "    $name ($size)"
+        done
+        info "  These directories are created by specific apps — restore only if the app is installed."
+        echo ""
+    fi
+fi
+
+# iCloud sync advisory
+info "If you sign into iCloud, Documents and Desktop will sync automatically."
+info "Restoring from backup is insurance for files that weren't in iCloud."
 echo ""
 
-FILES_SRC="$BACKUP/files"
 if [ -d "$FILES_SRC" ]; then
+    # Restore scattered credentials first (most important)
+    CREDS_SRC="$FILES_SRC/scattered-credentials"
+    if [ -d "$CREDS_SRC" ] && [ -f "$CREDS_SRC/_found.txt" ] && [ -s "$CREDS_SRC/_found.txt" ]; then
+        warn "Scattered credential files found in backup:"
+        cat "$CREDS_SRC/_found.txt" | sed 's/^/    /'
+        echo ""
+        confirm "Restore these credential files to their original locations?" && {
+            while IFS= read -r rel; do
+                [ -n "$rel" ] || continue
+                src="$CREDS_SRC/$rel"
+                dest="$HOME/$rel"
+                [ -f "$src" ] || continue
+                mkdir -p "$(dirname "$dest")"
+                cp -a "$src" "$dest" 2>/dev/null
+            done < "$CREDS_SRC/_found.txt"
+            log "Scattered credentials restored"
+            sensitive "Review these files and rotate any exposed secrets"
+        }
+    fi
+
+    # Restore auth tokens
+    AUTH_SRC="$FILES_SRC/auth-tokens"
+    if [ -d "$AUTH_SRC" ] && [ "$(ls -A "$AUTH_SRC" 2>/dev/null)" ]; then
+        info "Auth tokens from backup:"
+        find "$AUTH_SRC" -type f -not -name '.*' 2>/dev/null | sed "s|$AUTH_SRC/||" | sed 's/^/    /'
+        confirm "Restore auth tokens (GitHub CLI, Sourcery, etc.)?" && {
+            # GitHub CLI
+            [ -f "$AUTH_SRC/gh/hosts.yml" ] && {
+                mkdir -p "$HOME/.config/gh"
+                cp "$AUTH_SRC/gh/hosts.yml" "$HOME/.config/gh/" 2>/dev/null
+                log "GitHub CLI auth restored"
+            }
+            # Sourcery
+            [ -f "$AUTH_SRC/sourcery/auth.yaml" ] && {
+                mkdir -p "$HOME/.config/sourcery"
+                cp "$AUTH_SRC/sourcery/auth.yaml" "$HOME/.config/sourcery/" 2>/dev/null
+                log "Sourcery auth restored"
+            }
+        }
+    fi
+
+    # Restore loose photos from Desktop to ~/Pictures/
+    DESKTOP_SRC="$FILES_SRC/Desktop"
+    if [ -d "$DESKTOP_SRC" ]; then
+        PHOTO_COUNT=$(find "$DESKTOP_SRC" -maxdepth 1 -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.heic" -o -iname "*.raw" -o -iname "*.cr2" -o -iname "*.arw" \) 2>/dev/null | wc -l | tr -d ' ')
+        if [ "$PHOTO_COUNT" -gt 0 ]; then
+            info "Found $PHOTO_COUNT loose photos on the old Desktop"
+            confirm "Move these to ~/Pictures/ instead of Desktop? (keeps Desktop clean)" && {
+                mkdir -p "$HOME/Pictures/Imported"
+                find "$DESKTOP_SRC" -maxdepth 1 -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.heic" -o -iname "*.raw" -o -iname "*.cr2" -o -iname "*.arw" \) 2>/dev/null | while read -r photo; do
+                    cp -a "$photo" "$HOME/Pictures/Imported/" 2>/dev/null
+                done
+                log "Photos moved to ~/Pictures/Imported/"
+            }
+        fi
+    fi
+
+    echo ""
+
+    # Restore remaining personal files (skip already-handled items)
     for dir in "$FILES_SRC"/*/; do
         [ -d "$dir" ] || continue
         name=$(basename "$dir")
-        # Screenshots already handled in Step 10
-        [ "$name" = "Screenshots" ] && continue
+        # Skip items handled in other steps
+        case "$name" in
+            Screenshots|scattered-credentials|auth-tokens) continue ;;
+        esac
         SIZE=$(du -sh "$dir" 2>/dev/null | cut -f1)
+
+        # Special handling for Documents — warn about stale/archival subdirs
+        if [ "$name" = "Documents" ] && [ -f "$DATA_CLASS" ]; then
+            HAS_STALE=$(grep "^STALE\|^ARCHIVAL" "$DATA_CLASS" 2>/dev/null | head -1)
+            if [ -n "$HAS_STALE" ]; then
+                warn "Documents ($SIZE) contains stale/archival data (see classification above)"
+                confirm "Restore Documents? (you can skip stale subdirs after)" && {
+                    rsync -a "$dir" "$HOME/$name/" 2>/dev/null
+                    log "$name restored"
+                    info "Consider removing old sync artifacts from ~/Documents/ after review"
+                }
+                continue
+            fi
+        fi
+
         confirm "Restore $name ($SIZE)?" && {
             rsync -a "$dir" "$HOME/$name/" 2>/dev/null
             log "$name restored"

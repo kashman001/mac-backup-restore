@@ -804,14 +804,16 @@ if [ "$ORPHAN_COUNT" -gt 0 ]; then
     [ "$ORPHAN_COUNT" -gt 20 ] && info "  ... and $(( ORPHAN_COUNT - 20 )) more (see _orphan-code-files.txt)"
 fi
 
-# ── 5. Personal Files ───────────────────────────────────────────────────────
+# ── 5. Personal Files (classified by data type) ───────────────────────────
 phase "Personal Files"
 FILES="$BACKUP_DIR/files"
 mkdir -p "$FILES"
 
 # Warn about iCloud offloading
 info "Checking for iCloud Desktop & Documents sync..."
+ICLOUD_ENABLED=false
 if [ -d "$HOME/Library/Mobile Documents/com~apple~CloudDocs" ]; then
+    ICLOUD_ENABLED=true
     warn "iCloud Desktop & Documents is ENABLED"
     warn "Files may be offloaded (stubs only). Options:"
     echo "    1. Download all files first: select files in Finder → right-click → Download Now"
@@ -820,8 +822,7 @@ if [ -d "$HOME/Library/Mobile Documents/com~apple~CloudDocs" ]; then
     echo ""
 fi
 
-# Sweep screenshots from Desktop (and other locations) into organized structure
-# macOS names them: "Screenshot YYYY-MM-DD at H.MM.SS AM.png"
+# ── 5a. Screenshots — organized by date
 info "Scanning for screenshots..."
 SCREENSHOTS_DIR="$FILES/Screenshots"
 mkdir -p "$SCREENSHOTS_DIR"
@@ -830,14 +831,12 @@ for search_dir in "$HOME/Desktop" "$HOME/Documents" "$HOME/Downloads"; do
     [ -d "$search_dir" ] || continue
     find "$search_dir" -maxdepth 2 -name "Screenshot *.png" -type f 2>/dev/null | while read -r screenshot; do
         fname=$(basename "$screenshot")
-        # Parse date from "Screenshot YYYY-MM-DD at ..."
         if [[ "$fname" =~ ^Screenshot\ ([0-9]{4})-([0-9]{2})-([0-9]{2}) ]]; then
             year="${BASH_REMATCH[1]}"
             month="${BASH_REMATCH[2]}"
             mkdir -p "$SCREENSHOTS_DIR/$year/$month"
             cp -a "$screenshot" "$SCREENSHOTS_DIR/$year/$month/" 2>/dev/null
         else
-            # Non-standard name, put in unsorted
             mkdir -p "$SCREENSHOTS_DIR/unsorted"
             cp -a "$screenshot" "$SCREENSHOTS_DIR/unsorted/" 2>/dev/null
         fi
@@ -847,7 +846,6 @@ done
 SCREENSHOT_COUNT=$(find "$SCREENSHOTS_DIR" -type f -name "*.png" 2>/dev/null | wc -l | tr -d ' ')
 if [ "$SCREENSHOT_COUNT" -gt 0 ]; then
     log "Organized $SCREENSHOT_COUNT screenshots by date into backup"
-    # Show the year/month breakdown
     find "$SCREENSHOTS_DIR" -mindepth 2 -maxdepth 2 -type d 2>/dev/null | sort | while read -r ym; do
         count=$(find "$ym" -type f 2>/dev/null | wc -l | tr -d ' ')
         rel="${ym#$SCREENSHOTS_DIR/}"
@@ -857,6 +855,150 @@ else
     info "No screenshots found"
 fi
 echo ""
+
+# ── 5b. Scattered credentials — find secrets outside ~/.ssh and ~/.gnupg
+info "Scanning for scattered credentials and secrets..."
+CREDS="$FILES/scattered-credentials"
+mkdir -p "$CREDS"
+CRED_COUNT=0
+
+# Sensitive files by name pattern (backup codes, tokens, key files)
+find "$HOME/Documents" "$HOME/Desktop" "$HOME/Downloads" -maxdepth 4 -type f \( \
+    -iname "*backup-code*" -o -iname "*recovery-code*" -o -iname "*secret*key*" \
+    -o -iname "*api*key*" -o -iname "*token*" -o -iname "*.pem" \
+    -o -iname "*.key" -o -iname "*credential*" -o -iname "*license*key*" \
+    \) \
+    -not -path "*/.Trash/*" \
+    -not -path "*/node_modules/*" \
+    2>/dev/null | while read -r f; do
+        rel="${f#$HOME/}"
+        mkdir -p "$CREDS/$(dirname "$rel")"
+        cp -a "$f" "$CREDS/$rel" 2>/dev/null
+        echo "$rel"
+    done > "$CREDS/_found.txt" 2>/dev/null
+
+CRED_COUNT=$(wc -l < "$CREDS/_found.txt" 2>/dev/null | tr -d ' ')
+if [ "$CRED_COUNT" -gt 0 ]; then
+    warn "Found $CRED_COUNT credential/secret files scattered in your Documents:"
+    cat "$CREDS/_found.txt" | sed 's/^/    /'
+    sensitive "These have been backed up to scattered-credentials/"
+else
+    info "No scattered credentials found"
+    rm -rf "$CREDS"
+fi
+
+# App-specific auth tokens in ~/.config
+info "Scanning ~/.config for auth tokens..."
+AUTH_TOKENS="$FILES/auth-tokens"
+mkdir -p "$AUTH_TOKENS"
+
+# GitHub CLI (OAuth tokens)
+[ -f "$HOME/.config/gh/hosts.yml" ] && {
+    mkdir -p "$AUTH_TOKENS/gh"
+    cp "$HOME/.config/gh/hosts.yml" "$AUTH_TOKENS/gh/" 2>/dev/null
+    sensitive "GitHub CLI auth token"
+}
+
+# Sourcery
+[ -f "$HOME/.config/sourcery/auth.yaml" ] && {
+    mkdir -p "$AUTH_TOKENS/sourcery"
+    cp "$HOME/.config/sourcery/auth.yaml" "$AUTH_TOKENS/sourcery/" 2>/dev/null
+    sensitive "Sourcery auth token"
+}
+
+echo ""
+
+# ── 5c. Classify Documents content before backing up
+info "Analyzing Documents folder structure..."
+DOC="$HOME/Documents"
+if [ -d "$DOC" ]; then
+    DATA_CLASS="$FILES/_data-classification.txt"
+    {
+        echo "# ═══════════════════════════════════════════════════════════════"
+        echo "# Data Classification — generated $(date)"
+        echo "#"
+        echo "# How your data will be organized on the new Mac:"
+        echo "#   CLOUD-SYNCED → will re-sync via iCloud/OneDrive (backup = insurance)"
+        echo "#   DOCUMENTS    → personal and work files → ~/Documents/"
+        echo "#   ARCHIVAL     → large old data (Zoom, recordings) → consider cloud/external"
+        echo "#   APP-DATA     → created by specific apps → restored with the app"
+        echo "#   MEDIA        → photos, videos → ~/Pictures/ or ~/Movies/"
+        echo "#   STALE        → multi-machine sync artifacts, temp folders → review before migrating"
+        echo "# ═══════════════════════════════════════════════════════════════"
+        echo ""
+    } > "$DATA_CLASS"
+
+    # Detect multi-machine sync artifacts
+    STALE_DIRS=""
+    for sync_dir in "$DOC"/Documents\ -\ *; do
+        [ -d "$sync_dir" ] || continue
+        name=$(basename "$sync_dir")
+        SIZE=$(du -sh "$sync_dir" 2>/dev/null | cut -f1)
+        STALE_DIRS="$STALE_DIRS\n  STALE | $name | $SIZE | Old device sync — review before migrating"
+        echo "STALE          | $name | $SIZE" >> "$DATA_CLASS"
+    done
+    for sync_dir in "$HOME/Desktop"/Desktop\ -\ *; do
+        [ -d "$sync_dir" ] || continue
+        name=$(basename "$sync_dir")
+        SIZE=$(du -sh "$sync_dir" 2>/dev/null | cut -f1)
+        STALE_DIRS="$STALE_DIRS\n  STALE | $name | $SIZE | Old device sync — review before migrating"
+        echo "STALE          | $name | $SIZE" >> "$DATA_CLASS"
+    done
+
+    if [ -n "$STALE_DIRS" ]; then
+        echo ""
+        warn "Multi-machine sync artifacts found (old device data):"
+        echo -e "$STALE_DIRS"
+        echo ""
+        info "These are from iCloud syncing files from other Macs."
+        info "You likely don't need these on the new Mac."
+    fi
+
+    # Detect Zoom recordings (archival data)
+    ZOOM_DIR="$DOC/Zoom"
+    if [ -d "$ZOOM_DIR" ]; then
+        ZOOM_SIZE=$(du -sh "$ZOOM_DIR" 2>/dev/null | cut -f1)
+        ZOOM_COUNT=$(find "$ZOOM_DIR" -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
+        echo ""
+        warn "Zoom recordings: $ZOOM_COUNT folders, $ZOOM_SIZE total"
+        info "These are archival — consider moving to cloud storage instead of the new Mac"
+        echo "ARCHIVAL       | Zoom/ | $ZOOM_SIZE | $ZOOM_COUNT meeting recordings" >> "$DATA_CLASS"
+    fi
+
+    # Detect app-generated data directories
+    for app_dir in \
+        "Adobe"  "Blackmagic Design" "DaVinci Resolve" \
+        "Snagit" "Hook" "NoMachine" "WebEx"; do
+        if [ -d "$DOC/$app_dir" ]; then
+            SIZE=$(du -sh "$DOC/$app_dir" 2>/dev/null | cut -f1)
+            echo "APP-DATA       | $app_dir/ | $SIZE | Restore only if app is installed" >> "$DATA_CLASS"
+        fi
+    done
+
+    # Everything else is user documents
+    for item in "$DOC"/*/; do
+        [ -d "$item" ] || continue
+        name=$(basename "$item")
+        # Skip already-classified directories
+        case "$name" in
+            Zoom|Adobe*|"Blackmagic Design"|"DaVinci Resolve"|Snagit|Hook|NoMachine|WebEx) continue ;;
+            Documents\ -\ *) continue ;;
+            mac-backup-restore) continue ;;
+        esac
+        SIZE=$(du -sh "$item" 2>/dev/null | cut -f1)
+        echo "DOCUMENTS      | $name/ | $SIZE" >> "$DATA_CLASS"
+    done
+
+    log "Data classification → _data-classification.txt"
+    echo ""
+fi
+
+# ── 5d. Back up personal files (with classification awareness)
+if $ICLOUD_ENABLED; then
+    info "Since iCloud is enabled, Documents and Desktop will re-sync on the new Mac."
+    info "This backup serves as insurance and for organizing data on restore."
+    echo ""
+fi
 
 for dir in "$HOME/Documents" "$HOME/Desktop" "$HOME/Downloads" "$HOME/Pictures" "$HOME/Music" "$HOME/Movies"; do
     name=$(basename "$dir")
@@ -870,6 +1012,14 @@ for dir in "$HOME/Documents" "$HOME/Desktop" "$HOME/Downloads" "$HOME/Pictures" 
         log "$name"
     }
 done
+
+# ── 5e. Loose photos on Desktop (not screenshots)
+PHOTO_COUNT=$(find "$HOME/Desktop" -maxdepth 1 -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.heic" -o -iname "*.raw" -o -iname "*.cr2" -o -iname "*.arw" \) 2>/dev/null | wc -l | tr -d ' ')
+if [ "$PHOTO_COUNT" -gt 0 ]; then
+    echo ""
+    info "Found $PHOTO_COUNT loose photos on Desktop (not screenshots)"
+    info "These will be moved to ~/Pictures/ during restore"
+fi
 
 # ── 6. System ───────────────────────────────────────────────────────────────
 phase "System Config"

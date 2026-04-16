@@ -160,12 +160,17 @@ When you run backup.sh, it creates a timestamped directory on the external drive
 │   └── <original-path>/         ← project files, mirroring home directory structure
 │       └── <project-name>/          (node_modules, .venv, build dirs excluded)
 ├── files/
+│   ├── _data-classification.txt ← every data directory classified by type
 │   ├── Screenshots/             ← organized from Desktop clutter into YYYY/MM/
 │   │   ├── 2025/
 │   │   │   ├── 01/
 │   │   │   ├── 06/
 │   │   │   └── ...
 │   │   └── unsorted/            ← screenshots with non-standard filenames
+│   ├── scattered-credentials/   ← secrets found outside ~/.ssh (backup codes, API keys, .pem files)
+│   ├── auth-tokens/             ← app auth tokens (GitHub CLI, Sourcery, etc.)
+│   │   ├── gh/hosts.yml
+│   │   └── sourcery/auth.yaml
 │   ├── Documents/
 │   ├── Desktop/
 │   ├── Downloads/
@@ -178,6 +183,8 @@ When you run backup.sh, it creates a timestamped directory on the external drive
 ```
 
 The key addition compared to a typical backup tool is the `install-sources.txt` classification file and `Brewfile.addon`. The backup scans every app in /Applications, figures out how it was originally installed (Homebrew cask, Mac App Store, manual download, macOS-bundled), and for manual installs, checks if a Homebrew cask exists. The addon Brewfile contains cask entries for all those apps, so the restore can install them cleanly via Homebrew even though they were originally .dmg downloads.
+
+The `_data-classification.txt` file in `files/` categorizes every data directory by type: cloud-synced (will re-sync via iCloud), documents (personal and work files), archival (large old data like Zoom recordings), app-data (created by specific apps, only useful if the app is installed), media (photos, videos), and stale (multi-machine sync artifacts from old devices). The restore script uses this classification to guide decisions — stale data is flagged for skipping, archival data is flagged for cloud/external storage, and app-data is flagged as conditional on the app being installed.
 
 Each directory is self-contained and independently useful — you could restore just your dotfiles or just your Brewfile without touching anything else.
 
@@ -195,10 +202,14 @@ The restore script creates an opinionated but standards-based directory layout o
 │   ├── oss/                   ← open source contributions and forks
 │   └── experiments/           ← throwaway code, spikes, one-off tests
 ├── Documents/                 ← synced to iCloud Desktop & Documents
-├── Desktop/                   ← kept intentionally clean
+│   ├── Work/                  ← employer/client documents
+│   ├── Education/             ← courses, study materials
+│   └── ...                    ← personal documents by topic
+├── Desktop/                   ← kept intentionally clean (no screenshots, no loose photos)
 ├── Downloads/                 ← transient; cleared regularly
 ├── Pictures/
-│   └── Screenshots/           ← macOS screenshot destination (via defaults write)
+│   ├── Screenshots/           ← macOS screenshot destination (via defaults write)
+│   └── Imported/              ← loose photos rescued from old Desktop
 ├── Music/
 ├── Movies/
 ├── .config/                   ← XDG Base Directory configs
@@ -217,6 +228,16 @@ The macOS default of dropping screenshots on the Desktop leads to visual clutter
 
 **Why .config/ for XDG-style configs:**
 The XDG Base Directory Specification (freedesktop.org) defines `~/.config` as the standard location for user configuration files. Most modern CLI tools (starship, lazygit, neovim, alacritty, etc.) already look here by default. Centralizing configs in `~/.config` instead of scattering dozens of dotfiles across `~/` keeps the home directory clean and makes configs easier to back up.
+
+**Where different data types end up:**
+
+Not all data is equal, and the restore handles each type differently. Irreplaceable personal documents (contracts, certificates, financial records) go to `~/Documents/` and are protected by iCloud sync plus the backup as insurance. Work documents land in `~/Documents/Work/`. Code projects are consolidated into `~/Developer/` by context. Screenshots go to `~/Pictures/Screenshots/` organized by year and month. Loose photos found on the old Desktop get moved to `~/Pictures/Imported/` instead of cluttering the new Desktop.
+
+Multi-machine sync artifacts (those "Documents - Mac mini" folders from iCloud) are flagged as stale and recommended for skipping — they're leftovers from previous devices that shouldn't follow you to the new machine. Large archival data like Zoom recordings (potentially tens of gigabytes of meeting videos from years past) is flagged for cloud storage or an external drive rather than consuming SSD space on a fresh machine. App-generated data (DaVinci Resolve projects, Snagit captures, Hook links) is restored conditionally — only worth copying if the app is also being installed.
+
+Scattered credentials (backup codes in Documents, API key files on the Desktop) are detected and restored first, since they're the easiest to lose and the hardest to replace. Auth tokens for CLI tools (GitHub CLI, Sourcery) are restored to `~/.config/` so your development tools work immediately.
+
+Cloud-native data (anything in iCloud, OneDrive, 1Password) will re-sync when you sign into the corresponding account. The backup captures it as insurance, but the primary migration path for cloud data is the account sign-in, not the backup drive.
 
 ---
 
@@ -286,7 +307,7 @@ The script assumes an organic, adhoc setup — software installed through a mix 
 
 **Phase 4 — Project Discovery.** Scans the entire home directory up to 5 levels deep for `.git` directories, excluding Library, Trash, node_modules, anaconda3, and virtual environments. Also scans for orphan code files (`.py`, `.ipynb`, `.js`, `.sh`, etc.) that aren't inside any git repo and logs them separately.
 
-**Phase 5 — Personal Files.** Warns about iCloud offloading (files may be stubs if Desktop & Documents sync is enabled). Sweeps screenshots from Desktop, Documents, and Downloads, parsing dates from the macOS naming convention (`Screenshot YYYY-MM-DD at H.MM.SS AM.png`) and organizing them into `Screenshots/YYYY/MM/` folders — non-standard filenames go to `Screenshots/unsorted/`. Then iterates through Documents, Desktop, Downloads, Pictures, Music, and Movies with size and confirmation prompts.
+**Phase 5 — Personal Files.** This is the most nuanced phase. Rather than blindly copying everything, it classifies data first. Warns about iCloud offloading (files may be stubs if Desktop & Documents sync is enabled). Sweeps screenshots from Desktop, Documents, and Downloads into organized `Screenshots/YYYY/MM/` folders. Scans for scattered credentials and secrets (backup codes, API keys, .pem files found outside ~/.ssh). Captures auth tokens from `~/.config/` (GitHub CLI, Sourcery, etc.). Analyzes the Documents folder to produce a `_data-classification.txt` that flags multi-machine sync artifacts (old "Documents - Mac mini" folders from iCloud), archival data (Zoom recordings), and app-generated data (DaVinci Resolve projects, Snagit captures). Detects loose photos on the Desktop for relocation to ~/Pictures/. Then iterates through Documents, Desktop, Downloads, Pictures, Music, and Movies with size and confirmation prompts.
 
 **Phase 6 — System Config.** Captures crontab and Launch Agents.
 
@@ -349,7 +370,7 @@ The restore strategy is: install everything possible through Homebrew (even apps
 
 **Step 13 — Projects.** Flattens all backed-up projects (regardless of where they were scattered on the old Mac) into `~/Developer/personal/`. Shows where they originally came from. Flags orphan code files that weren't in any git repo.
 
-**Step 14 — Personal Files.** Notes that iCloud will re-sync Documents and Desktop automatically. Restores from backup as supplemental insurance. Skips the Screenshots directory (already handled in Step 12).
+**Step 14 — Personal Files.** The most interactive step. Displays the data classification from the backup, highlighting stale data (old device sync artifacts — recommends skipping), archival data (Zoom recordings — recommends cloud/external storage), and app-generated data (only needed if the app is installed). Restores scattered credentials and auth tokens first (most important for getting tools working). Offers to move loose photos from Desktop to `~/Pictures/Imported/` to keep the Desktop clean. Restores remaining personal files (Documents, Desktop, Downloads, Pictures, Music, Movies) with size prompts, noting that iCloud-synced content will also re-sync when you sign in.
 
 **Step 15 — Python & Conda.** Recreates conda environments from exported YAML files. Reinstalls npm globals. This is late because it depends on runtimes from Step 2.
 
