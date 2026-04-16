@@ -416,11 +416,21 @@ Each check is either a pass (green checkmark), fail (red X), or skip (blue info,
 
 ## Security
 
-The backup contains sensitive material: SSH private keys, GPG secret keys, AWS credentials, Kubernetes configs, and potentially other secrets in dotfiles. Treat the backup drive accordingly.
+**What the backup contains.** The backup includes sensitive material: SSH private keys, GPG secret keys, AWS/Kubernetes credentials, GitHub CLI tokens, app auth tokens, and potentially other secrets scattered in dotfiles. Every sensitive operation is flagged with a lock icon in the script output so you always know when secrets are being handled.
 
-Recommended precautions: encrypt the external drive using Disk Utility (Erase with APFS Encrypted format), don't leave the drive unattended during migration, and securely erase the backup after you've verified the new Mac is working. The scripts flag every sensitive operation with a lock icon in the output so you always know when secrets are being handled.
+**What the backup does not contain.** Keychain passwords, browser saved passwords, and system-level credentials are not captured by these scripts. Those sync through iCloud Keychain or your browser's own account sync.
 
-The backup does not capture passwords from Keychain, browser saved passwords, or system-level credentials. Those sync through iCloud Keychain or your browser's own sync mechanism.
+**Drive security.** Encrypt the external drive using Disk Utility (Erase → APFS Encrypted) before use. The backup directory is created with `chmod 700` (owner read/write only), so it is not accessible to other accounts on a shared Mac. After you have verified the new Mac is fully working, securely erase the backup folder or reformat the drive.
+
+**Permission hardening.** The restore script applies strict permissions automatically: `~/.ssh/` is set to 700, private keys to 600, public keys and config to 644. Auth token files (GitHub CLI `hosts.yml`, Sourcery `auth.yaml`) are set to 600 on restore. If you add other token files to the auth-tokens backup, add corresponding `chmod 600` lines in restore.sh.
+
+**GPG keys.** GPG secret keys are exported unencrypted (armor format) to the backup. On an encrypted drive with physical security this is acceptable, but you can add a passphrase to the export by replacing `--export-secret-keys` with `--export-secret-keys --passphrase <your-passphrase>` in backup.sh.
+
+**Config files as code.** The four files in `config/` are sourced as shell scripts at runtime. They are part of the repo and should be treated as trusted code. If you share the repo publicly, do not put secrets in config files — only app names, bundle IDs, and path patterns belong there.
+
+**`defaults read` export.** The full macOS defaults export (`macos-defaults-full.txt`) may contain app preference data that includes cached tokens or API keys stored by certain apps. It is protected by the backup directory's 700 permissions, but review it before sharing the backup with anyone.
+
+**Injection hardening.** Browser extension manifests and Steam `.acf` game manifests are read and parsed during backup. The scripts pass file paths to Python via environment variables (not string interpolation) and validate Steam size values as numeric before use, preventing code injection from malformed third-party files.
 
 ---
 

@@ -50,6 +50,9 @@ fi
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_DIR="$DRIVE/mac-backup/$TIMESTAMP"
 mkdir -p "$BACKUP_DIR"
+chmod 700 "$BACKUP_DIR"
+# Also restrict the parent mac-backup container so directory listing is owner-only
+chmod 700 "$DRIVE/mac-backup" 2>/dev/null || true
 
 header "Mac Backup"
 info "Destination: $BACKUP_DIR"
@@ -234,24 +237,28 @@ _scan_chromium_extensions() {
         # Find the latest version's manifest.json
         manifest=$(find "$ext_id_dir" -maxdepth 2 -name "manifest.json" -type f 2>/dev/null | head -1)
         if [ -n "$manifest" ] && [ -f "$manifest" ]; then
-            name=$(python3 -c "
-import json, sys
+            # Pass values via env vars (not interpolated into the script) to prevent
+            # shell injection if a manifest path or extension ID contains special chars.
+            name=$(PYMANIFEST="$manifest" PYEXTID="$ext_id" python3 -c '
+import json, os
+mp, eid = os.environ["PYMANIFEST"], os.environ["PYEXTID"]
 try:
-    m = json.load(open('$manifest'))
-    n = m.get('name', '$ext_id')
+    m = json.load(open(mp))
+    n = m.get("name", eid)
     # Skip Chrome internal MSG references that need locale lookup
-    if n.startswith('__MSG_'):
-        n = m.get('short_name', n)
-    if n.startswith('__MSG_'):
-        n = '$ext_id'
+    if n.startswith("__MSG_"):
+        n = m.get("short_name", n)
+    if n.startswith("__MSG_"):
+        n = eid
     print(n)
-except: print('$ext_id')
-" 2>/dev/null)
-            version=$(python3 -c "
-import json
-try: print(json.load(open('$manifest')).get('version','?'))
-except: print('?')
-" 2>/dev/null)
+except:
+    print(eid)
+' 2>/dev/null)
+            version=$(PYMANIFEST="$manifest" python3 -c '
+import json, os
+try: print(json.load(open(os.environ["PYMANIFEST"])).get("version", "?"))
+except: print("?")
+' 2>/dev/null)
             echo "$ext_id | $name | $version" >> "$outfile"
         else
             echo "$ext_id | (unknown) |" >> "$outfile"
@@ -386,9 +393,15 @@ if [ -d "$STEAM_DIR/steamapps" ]; then
         appid=$(grep '"appid"' "$manifest" | grep -o '[0-9]*')
         name=$(grep '"name"' "$manifest" | sed 's/.*"\(.*\)"/\1/' | tail -1)
         size=$(grep '"SizeOnDisk"' "$manifest" | grep -o '[0-9]*')
-        size_human=$(numfmt --to=iec "$size" 2>/dev/null || \
-            awk "BEGIN{s=$size; u=\"BKMGT\"; for(i=0;s>=1024&&i<4;i++)s/=1024; printf \"%.0f%s\",s,substr(u,i+1,1)}" 2>/dev/null || \
-            echo "${size}B")
+        # Validate size is a pure integer before using in arithmetic (guards awk injection
+        # if the .acf file were ever maliciously crafted).
+        if [[ "$size" =~ ^[0-9]+$ ]]; then
+            size_human=$(numfmt --to=iec "$size" 2>/dev/null || \
+                awk -v s="$size" 'BEGIN{u="BKMGT"; for(i=0;s>=1024&&i<4;i++)s/=1024; printf "%.0f%s",s,substr(u,i+1,1)}' 2>/dev/null || \
+                echo "${size}B")
+        else
+            size_human="?"
+        fi
         echo "$appid | $name | $size_human" >> "$STEAM_LIST"
     done
 

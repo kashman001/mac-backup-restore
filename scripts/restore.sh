@@ -679,12 +679,14 @@ if [ -d "$FILES_SRC" ]; then
             [ -f "$AUTH_SRC/gh/hosts.yml" ] && {
                 mkdir -p "$HOME/.config/gh"
                 cp "$AUTH_SRC/gh/hosts.yml" "$HOME/.config/gh/" 2>/dev/null
+                chmod 600 "$HOME/.config/gh/hosts.yml" 2>/dev/null
                 log "GitHub CLI auth restored"
             }
             # Sourcery
             [ -f "$AUTH_SRC/sourcery/auth.yaml" ] && {
                 mkdir -p "$HOME/.config/sourcery"
                 cp "$AUTH_SRC/sourcery/auth.yaml" "$HOME/.config/sourcery/" 2>/dev/null
+                chmod 600 "$HOME/.config/sourcery/auth.yaml" 2>/dev/null
                 log "Sourcery auth restored"
             }
         }
@@ -772,7 +774,10 @@ NPM_FILE="$BACKUP/software-inventory/npm-globals.txt"
 if [ -f "$NPM_FILE" ] && has npm; then
     info "npm global packages from backup"
     confirm "Reinstall npm global packages?" && {
+        # Filter to valid npm package name characters before passing to xargs to
+        # prevent injection from a tampered backup file.
         grep -E '├──|└──' "$NPM_FILE" | awk '{print $2}' | cut -d@ -f1 | \
+            grep -E '^(@[a-zA-Z0-9_-]+/)?[a-zA-Z0-9][a-zA-Z0-9_.-]*$' | \
             xargs -I{} npm install -g {} 2>/dev/null
         log "npm globals installed"
     }
@@ -795,19 +800,21 @@ fi
 PIPX_FILE="$BACKUP/software-inventory/pipx-packages.json"
 if [ -f "$PIPX_FILE" ] && has pipx; then
     info "pipx packages from backup:"
-    python3 -c "
-import json, sys
-data = json.load(open('$PIPX_FILE'))
-for pkg in data.get('venvs', {}):
-    print(f'    {pkg}')
-" 2>/dev/null
+    # Pass the file path via an env var (not interpolated into the script string)
+    # to prevent injection if the backup path contains special characters.
+    PYPIPX="$PIPX_FILE" python3 -c '
+import json, os
+data = json.load(open(os.environ["PYPIPX"]))
+for pkg in data.get("venvs", {}):
+    print(f"    {pkg}")
+' 2>/dev/null
     confirm "Reinstall pipx packages?" && {
-        python3 -c "
-import json
-data = json.load(open('$PIPX_FILE'))
-for pkg in data.get('venvs', {}):
+        PYPIPX="$PIPX_FILE" python3 -c '
+import json, os
+data = json.load(open(os.environ["PYPIPX"]))
+for pkg in data.get("venvs", {}):
     print(pkg)
-" 2>/dev/null | while read -r pkg; do
+' 2>/dev/null | while read -r pkg; do
             pipx install "$pkg" 2>/dev/null && log "  $pkg" || warn "  Failed: $pkg"
         done
     }
