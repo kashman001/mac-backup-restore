@@ -76,15 +76,22 @@ mac-backup-restore/
 ├── README.md
 ├── LICENSE
 ├── .gitignore
+├── config/
+│   ├── cask-map.sh             ← app name → Homebrew cask name overrides
+│   ├── license-plists.sh       ← app name → preference plist bundle IDs
+│   ├── app-settings.sh         ← app → config path → backup subdirectory
+│   └── migration-patterns.sh   ← sign-in apps, re-download apps
 └── scripts/
-    ├── backup.sh           ← run on the old Mac
-    ├── restore.sh          ← run on the new Mac
-    ├── verify.sh           ← run after restore to confirm success
+    ├── backup.sh               ← run on the old Mac
+    ├── restore.sh              ← run on the new Mac
+    ├── verify.sh               ← run after restore to confirm success
     └── lib/
-        └── helpers.sh      ← shared functions (logging, prompts, colors)
+        └── helpers.sh          ← shared functions (logging, prompts, colors)
 ```
 
 The scripts live in a `scripts/` directory rather than the repo root to keep the top level clean and to clearly separate documentation from executable code. The shared library lives in `scripts/lib/` following the Unix convention of keeping library code in a `lib/` subdirectory adjacent to the scripts that use it.
+
+The `config/` directory contains all user-customizable data. The scripts are generic — they source these config files and auto-discover as much as possible, falling back to the config for cases that can't be auto-detected (like the mapping between an app named "iTerm.app" and the Homebrew cask "iterm2"). You customize the config files for your setup; you rarely need to edit the scripts themselves.
 
 ---
 
@@ -151,7 +158,7 @@ When you run backup.sh, it creates a timestamped directory on the external drive
 │   └── plists/                  ← preference plists containing license keys/serials
 │       ├── com.barebones.bbedit.plist
 │       ├── com.surteesstudios.Bartender.plist
-│       └── ...                      (BBEdit, Bartender, iStat, TG Pro, Gemini, etc.)
+│       └── ...                      (one plist per app in config/license-plists.sh)
 ├── migration-manifest.txt       ← every app classified by migration pattern
 ├── crossover/                   ← CrossOver bottles (optional, can be very large)
 ├── projects/
@@ -182,7 +189,7 @@ When you run backup.sh, it creates a timestamped directory on the external drive
     └── LaunchAgents/            ← ~/Library/LaunchAgents plist files
 ```
 
-The key addition compared to a typical backup tool is the `install-sources.txt` classification file and `Brewfile.addon`. The backup scans every app in /Applications, figures out how it was originally installed (Homebrew cask, Mac App Store, manual download, macOS-bundled), and for manual installs, checks if a Homebrew cask exists. The addon Brewfile contains cask entries for all those apps, so the restore can install them cleanly via Homebrew even though they were originally .dmg downloads.
+The key addition compared to a typical backup tool is the `install-sources.txt` classification file and `Brewfile.addon`. The backup scans every app in /Applications, auto-discovers how it was installed (Homebrew cask, Mac App Store, manual download, macOS-bundled) by checking MAS receipts, querying `brew info`, and scanning /System/Applications. For manual installs, it checks if a Homebrew cask exists and generates an addon Brewfile so the restore can install them cleanly via Homebrew even though they were originally .dmg downloads.
 
 The `_data-classification.txt` file in `files/` categorizes every data directory by type: cloud-synced (will re-sync via iCloud), documents (personal and work files), archival (large old data like Zoom recordings), app-data (created by specific apps, only useful if the app is installed), media (photos, videos), and stale (multi-machine sync artifacts from old devices). The restore script uses this classification to guide decisions — stale data is flagged for skipping, archival data is flagged for cloud/external storage, and app-data is flagged as conditional on the app being installed.
 
@@ -233,7 +240,17 @@ The XDG Base Directory Specification (freedesktop.org) defines `~/.config` as th
 
 Not all data is equal, and the restore handles each type differently. Irreplaceable personal documents (contracts, certificates, financial records) go to `~/Documents/` and are protected by iCloud sync plus the backup as insurance. Work documents land in `~/Documents/Work/`. Code projects are consolidated into `~/Developer/` by context. Screenshots go to `~/Pictures/Screenshots/` organized by year and month. Loose photos found on the old Desktop get moved to `~/Pictures/Imported/` instead of cluttering the new Desktop.
 
-Multi-machine sync artifacts (those "Documents - Mac mini" folders from iCloud) are flagged as stale and recommended for skipping — they're leftovers from previous devices that shouldn't follow you to the new machine. Large archival data like Zoom recordings (potentially tens of gigabytes of meeting videos from years past) is flagged for cloud storage or an external drive rather than consuming SSD space on a fresh machine. App-generated data (DaVinci Resolve projects, Snagit captures, Hook links) is restored conditionally — only worth copying if the app is also being installed.
+Large archival data like Zoom recordings (potentially tens of gigabytes of meeting videos from years past) is flagged for cloud storage or an external drive rather than consuming SSD space on a fresh machine. App-generated data (DaVinci Resolve projects, Snagit captures, Hook links) is restored conditionally — only worth copying if the app is also being installed.
+
+**Multi-machine sync artifacts:**
+
+When iCloud Desktop & Documents sync is enabled across multiple Macs, iCloud creates folders like "Documents - Mac mini" or "Desktop - Kashif's MacBook Pro" to keep each machine's files separate. These are real files (not aliases or stubs) that live in iCloud Drive and sync down to every Mac on the same Apple ID. The problem is that they persist long after the original machine is gone — iCloud has no mechanism to clean them up automatically, so they accumulate as orphan folders.
+
+The files inside may be fully downloaded locally, or they may be offloaded "stubs" where macOS evicted the content to save disk space (visible as a small cloud icon in Finder; right-click shows "Download Now"). The backup script detects these folders, classifies them as STALE in `_data-classification.txt`, and warns you during restore rather than silently copying old device data onto your clean new Mac.
+
+To make sure nothing is lost before migrating: open each sync artifact folder in Finder and decide what's valuable. If files are offloaded (cloud icon), select them, right-click, and choose "Download Now" so the backup captures actual content rather than empty stubs. Move anything worth keeping into your regular Documents folder, then delete the empty artifact folders. For the authoritative view of what's in iCloud, check icloud.com — that's the canonical source. Deletions made there propagate to all your Macs.
+
+On the new Mac, these folders will reappear when you sign into iCloud and enable Desktop & Documents sync (they're still in iCloud Drive). This is why the backup script recommends skipping them during restore — iCloud handles it. Clean them up from icloud.com before migration if you want a fresh start.
 
 Scattered credentials (backup codes in Documents, API key files on the Desktop) are detected and restored first, since they're the easiest to lose and the hardest to replace. Auth tokens for CLI tools (GitHub CLI, Sourcery) are restored to `~/.config/` so your development tools work immediately.
 
@@ -255,11 +272,11 @@ Cloud-native data (anything in iCloud, OneDrive, 1Password) will re-sync when yo
 
 **Migration manifest and pattern classification.** The backup generates a `migration-manifest.txt` that classifies every installed app into one of five patterns: sign-in (cloud-synced), config restore, license-key restore, content re-download, or extension sync. This means you never have to guess what an app needs on the new Mac — the manifest tells you. The restore script's final summary is organized around these patterns too, so the post-restore checklist is practical rather than a generic list of "stuff to do."
 
-**License plist preservation.** Many macOS apps store their license or serial number in a preference plist under `~/Library/Preferences/`. The backup captures these explicitly, and the restore copies them back before you launch the apps. This avoids the common problem of having to dig through old emails looking for license keys. The toolkit maintains a map of known license plists (`LICENSE_PLISTS` in backup.sh) that you can extend for your own apps.
+**License plist preservation.** Many macOS apps store their license or serial number in a preference plist under `~/Library/Preferences/`. The backup captures these explicitly, and the restore copies them back before you launch the apps. This avoids the common problem of having to dig through old emails looking for license keys. The toolkit maintains a map of known license plists in `config/license-plists.sh` that you can extend for your own apps.
 
 **Organic-to-clean migration.** The backup script assumes your current Mac is an adhoc setup — apps installed through a mix of methods, code scattered across multiple directories, configs accumulated over years. It scans everywhere and classifies what it finds. The restore script then normalizes everything: Homebrew for all apps, ~/Developer/ for all code, proper permissions on all keys. You go from organic to organized without losing anything.
 
-**Brew-first install strategy.** The backup classifies every app in /Applications by install source and generates a Brewfile.addon for apps that were manually installed but have Homebrew casks available. On the new Mac, these get installed through Homebrew instead of manual downloads. This means `brew upgrade` keeps everything updated going forward — no more hunting for .dmg update dialogs.
+**Brew-first install strategy.** The backup classifies every app in /Applications by install source — auto-detecting bundled apps from /System/Applications, MAS apps from receipt directories, and discovering Homebrew cask names via `brew info` (with a user-editable `config/cask-map.sh` for overrides). It generates a Brewfile.addon for apps that were manually installed but have Homebrew casks available. On the new Mac, these get installed through Homebrew instead of manual downloads. This means `brew upgrade` keeps everything updated going forward — no more hunting for .dmg update dialogs.
 
 **Project discovery by .git directory.** Rather than requiring you to maintain a list of project paths, the backup script scans the entire home directory up to 5 levels deep looking for `.git` directories, excluding Library, Trash, and dependency directories. This catches everything regardless of where you happened to clone it. It also scans for orphan code files (scripts, notebooks) that aren't inside any git repo.
 
@@ -299,11 +316,11 @@ If you run it without arguments, it prints available volumes to help you find yo
 
 The script assumes an organic, adhoc setup — software installed through a mix of Homebrew, Mac App Store, direct downloads, standalone .pkg installers, JetBrains Toolbox, Docker Desktop, and CrossOver. It scans everything and classifies what it finds.
 
-**Phase 1 — Software Inventory.** Generates a Brewfile via `brew bundle dump`. Lists all apps in /Applications, then classifies each one by install source (Homebrew cask, Mac App Store, manual download, macOS-bundled) using a built-in mapping table. For manual installs, it checks if a Homebrew cask exists and generates a `Brewfile.addon` — this is what lets the restore convert manual installs to Homebrew. Also captures /usr/local/bin (standalone tools like Docker CLIs), package lists from npm, pip3, pipx, cargo, gem, Go, and extension lists from VS Code and Cursor. Scans browser extensions across Chrome, Arc, Opera, and Safari by parsing Chromium manifest.json files to extract human-readable names and versions. Captures application plugins including PyCharm/JetBrains user-installed plugins and Obsidian community plugins per vault. Exports Anaconda/conda environments as YAML files for recreation on the new Mac. Scans Steam for installed games (parsing appmanifest .acf files) and CrossOver game launchers (parsing Desktop .app bundles that call `steam://run/`).
+**Phase 1 — Software Inventory.** Generates a Brewfile via `brew bundle dump`. Lists all apps in /Applications, then classifies each one by install source (Homebrew cask, Mac App Store, manual download, macOS-bundled). For apps not in the user's `config/cask-map.sh`, the script auto-discovers cask names by querying `brew info`. For manual installs with a known cask, it generates a `Brewfile.addon` — this is what lets the restore convert manual installs to Homebrew. Bundled apps are auto-detected from /System/Applications and MAS apps from receipt directories. Also captures /usr/local/bin (standalone tools), package lists from npm, pip3, pipx, cargo, gem, Go, and extension lists from VS Code and Cursor. Scans browser extensions across Chrome, Arc, Opera, and Safari by parsing Chromium manifest.json files to extract human-readable names and versions. Captures application plugins from all JetBrains IDEs (not just PyCharm) and Obsidian community plugins per vault. Exports Anaconda/conda environments as YAML files for recreation on the new Mac. Scans Steam for installed games (parsing appmanifest .acf files) and CrossOver game launchers (parsing Desktop .app bundles that call `steam://run/`).
 
 **Phase 2 — Dotfiles & Config.** Instead of only copying a hardcoded list, it first grabs known priority dotfiles, then scans `~/` for any additional dotfiles it didn't predict. This catches organic configs that accumulate over time. Also backs up SSH, GPG, ~/.config, and cloud credentials (AWS, Kubernetes, Docker).
 
-**Phase 3 — Application Settings & Licenses.** Copies settings from VS Code, Cursor, Ghostty, iTerm2, Warp, PyCharm (via JetBrains config directories), and Obsidian. Exports the full macOS defaults database. Backs up license plists from `~/Library/Preferences/` for apps that store serial numbers or activation data in their preferences (BBEdit, Bartender, iStat Menus, TG Pro, Gemini 2, Shottr, TextSniper, CrossOver). Generates a migration manifest that classifies every installed app by migration pattern (sign-in, config, license-key, re-download, extension). Optionally backs up CrossOver bottles (which can be tens of gigabytes if you have Windows games installed).
+**Phase 3 — Application Settings & Licenses.** Copies settings for all apps listed in `config/app-settings.sh`, automatically finding the latest JetBrains IDE version directories. Exports the full macOS defaults database. Backs up license plists for apps listed in `config/license-plists.sh`. Generates a migration manifest that dynamically classifies every installed app by migration pattern — CONFIG and LICENSE-KEY apps are auto-detected from what was actually backed up, SIGN-IN apps come from `config/migration-patterns.sh`. Optionally backs up CrossOver bottles (which can be tens of gigabytes if you have Windows games installed).
 
 **Phase 4 — Project Discovery.** Scans the entire home directory up to 5 levels deep for `.git` directories, excluding Library, Trash, node_modules, anaconda3, and virtual environments. Also scans for orphan code files (`.py`, `.ipynb`, `.js`, `.sh`, etc.) that aren't inside any git repo and logs them separately.
 
@@ -354,15 +371,15 @@ The restore strategy is: install everything possible through Homebrew (even apps
 
 **Step 5 — Docker Desktop.** Confirms Docker is installed (via Homebrew cask) and notes that it automatically provides docker, docker-compose, and kubectl CLIs — no need for standalone installs in /usr/local/bin like the old Mac had.
 
-**Step 6 — JetBrains.** Checks for JetBrains Toolbox and restores PyCharm settings (code styles, keymaps, options) if available. JetBrains Toolbox handles IDE installation; settings can also sync via JetBrains account.
+**Step 6 — JetBrains.** Checks for JetBrains Toolbox and reminds you to install your IDEs. IDE settings are restored in Step 9 using the config-driven approach. Settings can also sync via JetBrains account.
 
 **Step 7 — Steam & Games.** Lists native macOS Steam games and CrossOver/Steam Windows games from the backup. Optionally restores CrossOver bottles (saves re-downloading game data). Provides steam:// install links for quick redownload.
 
 **Step 8 — Dotfiles & Config.** Restores dotfiles with `.pre-restore` safety backups, SSH keys with hardened permissions, GPG keys, ~/.config, and cloud credentials (AWS, Kubernetes, Docker).
 
-**Step 9 — Application Settings.** Restores settings for VS Code, Cursor, Ghostty, iTerm2, Warp, and Obsidian. Installs VS Code and Cursor extensions in parallel.
+**Step 9 — Application Settings.** Restores settings for all apps defined in `config/app-settings.sh`, including JetBrains IDE settings (auto-finds the latest version directory). Installs VS Code and Cursor extensions in parallel from the backed-up extension lists.
 
-**Step 10 — License Keys & Activation.** Restores preference plists that contain serial numbers and activation data to `~/Library/Preferences/`. Apps like BBEdit, Bartender, iStat Menus, and TG Pro should auto-activate when launched. Points the user to the migration manifest for a full breakdown of what each app needs. This is a Pattern 3 migration — the simplest path for licensed software.
+**Step 10 — License Keys & Activation.** Restores preference plists that contain serial numbers and activation data to `~/Library/Preferences/`. Apps listed in `config/license-plists.sh` should auto-activate when launched. Points the user to the migration manifest for a full breakdown of what each app needs. This is a Pattern 3 migration — the simplest path for licensed software.
 
 **Step 11 — Browser Extensions & App Plugins.** Displays the full inventory of browser extensions (Chrome, Arc, Opera, Safari) with human-readable names, and lists JetBrains IDE plugins and Obsidian community plugins. Browser extensions can't be auto-installed — this step provides the reference lists so you can reinstall them after signing into each browser (Pattern 5 — most will sync via account). JetBrains plugins need to be reinstalled via each IDE's Settings → Plugins.
 
@@ -372,7 +389,7 @@ The restore strategy is: install everything possible through Homebrew (even apps
 
 **Step 14 — Personal Files.** The most interactive step. Displays the data classification from the backup, highlighting stale data (old device sync artifacts — recommends skipping), archival data (Zoom recordings — recommends cloud/external storage), and app-generated data (only needed if the app is installed). Restores scattered credentials and auth tokens first (most important for getting tools working). Offers to move loose photos from Desktop to `~/Pictures/Imported/` to keep the Desktop clean. Restores remaining personal files (Documents, Desktop, Downloads, Pictures, Music, Movies) with size prompts, noting that iCloud-synced content will also re-sync when you sign in.
 
-**Step 15 — Python & Conda.** Recreates conda environments from exported YAML files. Reinstalls npm globals. This is late because it depends on runtimes from Step 2.
+**Step 15 — Language Package Managers.** Recreates conda environments from exported YAML files. Reinstalls npm globals, pip3 packages (with a recommendation to prefer virtual environments), pipx CLI tools, Cargo crates, and Ruby gems. This step is late because it depends on runtimes from Step 2.
 
 **Step 16 — System Config.** Restores crontab and Launch Agents.
 
@@ -382,13 +399,16 @@ Finishes with a structured summary organized by migration pattern: what was hand
 
 ## How to Use: Verify
 
-Run this on the new Mac after restore.sh completes.
+Run this on the new Mac after restore.sh completes. Optionally pass the backup path for a more thorough, data-driven check.
 
 ```bash
-./scripts/verify.sh
+./scripts/verify.sh                                            # generic checks only
+./scripts/verify.sh /Volumes/YourDrive/mac-backup/20260415_120000  # verify against backup
 ```
 
-This script runs a comprehensive checklist across ten categories: core tools (Homebrew, Git, git config), shell (zsh default, .zshrc exists), SSH (directory permissions, key permissions, GitHub connectivity test), GPG (key presence), development tools (node, npm, python3, pip3, code, cursor with version numbers), Homebrew health (formula/cask counts, checks for expected packages like git, gh, node, imagemagick and expected casks like visual-studio-code, cursor, docker, ghostty), directory structure (~/Developer tree, Screenshots folder, screenshot file count and year-directory organization), macOS settings (screenshot location, file extensions visible), cloud configs (AWS, Kubernetes, Docker), key applications (checks /Applications for expected apps), and Steam/CrossOver status (installed games, bottle counts).
+Without a backup path, the script runs generic checks across ten categories: core tools (Homebrew, Git, git config), shell (zsh default, .zshrc exists), SSH (directory permissions, key permissions, GitHub connectivity test), GPG (key presence), development tools (node, npm, python3, pip3, VS Code, Cursor with version numbers and extension counts), Homebrew health (formula and cask counts), directory structure (~/Developer tree, Screenshots folder and organization), macOS settings (screenshot location, file extension visibility), cloud configs (AWS, Kubernetes, Docker), installed applications (count), extensions and plugins (all Chromium browsers, all JetBrains IDEs), and Steam/CrossOver status if relevant.
+
+With a backup path, the script additionally verifies every Brewfile entry is installed and checks the full application inventory from `install-sources.txt`, reporting exactly which apps are missing.
 
 Each check is either a pass (green checkmark), fail (red X), or skip (blue info, for tools that weren't in the backup). At the end it prints a scorecard. Any failures indicate something that needs manual attention — the most common being GitHub SSH authentication, which requires adding your SSH public key to GitHub after restoring it to the new machine.
 
@@ -406,15 +426,21 @@ The backup does not capture passwords from Keychain, browser saved passwords, or
 
 ## Customization
 
+All user-specific data lives in the `config/` directory. You customize these files for your setup — the scripts themselves are generic and rarely need editing.
+
+**Adding app cask mappings** (`config/cask-map.sh`): Add entries when the app name doesn't trivially match the Homebrew cask name. For example, "iTerm.app" needs `["iTerm.app"]="iterm2"` because the cask name doesn't match. Most apps (like "Cursor.app" → "cursor") are auto-discovered via `brew info` and don't need entries.
+
+**Adding app settings** (`config/app-settings.sh`): Add a pipe-delimited entry with the app name, path relative to `$HOME`, backup subdirectory name, and optionally specific files to copy. For example: `"Alacritty|.config/alacritty|alacritty|"` to back up the entire directory, or `"VS Code|Library/Application Support/Code/User|vscode|settings.json keybindings.json snippets"` to copy specific files.
+
+**Adding license-key apps** (`config/license-plists.sh`): Add entries mapping the app display name to its preference plist bundle ID. Find an app's bundle ID with: `defaults read /Applications/AppName.app/Contents/Info.plist CFBundleIdentifier`.
+
+**Classifying sign-in apps** (`config/migration-patterns.sh`): Add apps that restore everything via account login to the `SIGN_IN_APPS` array. These won't have settings backed up — just a reminder to sign in after install.
+
+**Adding JetBrains IDEs** (`config/app-settings.sh`): Add entries to the `JETBRAINS_IDES` array. The script automatically finds the latest version directory and backs up settings subdirectories listed in `JETBRAINS_SUBDIRS`.
+
 **Adding dotfiles:** Edit the `PRIORITY_DOTFILES` array in `scripts/backup.sh`. The script also auto-discovers any dotfiles in `~/` not in the list, so this is mainly for prioritization.
 
-**Adding app cask mappings:** Edit the `CASK_MAP` associative array in backup.sh to add brew cask names for apps. This is how the script knows that "Ghostty.app" maps to `brew install --cask ghostty`.
-
-**Adding app settings:** Follow the existing pattern in Phase 3 of backup.sh — check if the app's config directory exists, create a subdirectory in the backup, and copy the relevant files.
-
 **Changing the Developer/ layout:** Edit Step 1 in `scripts/restore.sh` to create different subdirectories. Update Step 13 to change where projects are restored to.
-
-**Adding license-key apps:** Edit the `LICENSE_PLISTS` associative array in backup.sh to add new bundle IDs. Find an app's bundle ID with: `defaults read /Applications/AppName.app/Contents/Info.plist CFBundleIdentifier`.
 
 **Adding screenshot scan locations:** Edit the `for search_dir in ...` loop in Phase 5 of backup.sh to add directories beyond Desktop, Documents, and Downloads.
 

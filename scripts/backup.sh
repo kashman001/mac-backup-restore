@@ -13,7 +13,25 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/lib/helpers.sh"
+
+# ── Load user-customizable config ───────────────────────────────────────────
+CONFIG_DIR="$REPO_DIR/config"
+[ -f "$CONFIG_DIR/cask-map.sh" ]           && source "$CONFIG_DIR/cask-map.sh"
+[ -f "$CONFIG_DIR/license-plists.sh" ]     && source "$CONFIG_DIR/license-plists.sh"
+[ -f "$CONFIG_DIR/app-settings.sh" ]       && source "$CONFIG_DIR/app-settings.sh"
+[ -f "$CONFIG_DIR/migration-patterns.sh" ] && source "$CONFIG_DIR/migration-patterns.sh"
+
+# Ensure arrays exist even if config files are missing
+declare -A CASK_MAP 2>/dev/null || true
+declare -A LICENSE_PLISTS 2>/dev/null || true
+declare -a APP_SETTINGS 2>/dev/null || true
+declare -a SIGN_IN_APPS 2>/dev/null || true
+declare -a RE_DOWNLOAD_APPS 2>/dev/null || true
+declare -a JETBRAINS_IDES 2>/dev/null || true
+declare -a JETBRAINS_SUBDIRS 2>/dev/null || true
+[ ${#JETBRAINS_SUBDIRS[@]} -eq 0 ] && JETBRAINS_SUBDIRS=(codestyles colors inspection keymaps options templates)
 
 # ── Destination ──────────────────────────────────────────────────────────────
 DRIVE="${1:-}"
@@ -97,72 +115,78 @@ CLASSIFY="$INV/install-sources.txt"
     echo ""
 } > "$CLASSIFY"
 
-# Known brew cask mappings for common apps
-declare -A CASK_MAP=(
-    ["1Password.app"]="1password"
-    ["Anaconda-Navigator.app"]="anaconda"
-    ["Arc.app"]="arc"
-    ["BBEdit.app"]="bbedit"
-    ["Bartender 5.app"]="bartender"
-    ["ChatGPT.app"]="chatgpt"
-    ["Claude.app"]="claude"
-    ["Codex.app"]="codex"
-    ["CrossOver.app"]="crossover"
-    ["Cursor.app"]="cursor"
-    ["Docker.app"]="docker"
-    ["Gemini 2.app"]="gemini"
-    ["Ghostty.app"]="ghostty"
-    ["GitKraken.app"]="gitkraken"
-    ["Google Chrome.app"]="google-chrome"
-    ["JetBrains Toolbox.app"]="jetbrains-toolbox"
-    ["Microsoft Excel.app"]="microsoft-excel"
-    ["Microsoft OneNote.app"]="microsoft-onenote"
-    ["Microsoft Outlook.app"]="microsoft-outlook"
-    ["Microsoft PowerPoint.app"]="microsoft-powerpoint"
-    ["Microsoft Teams.app"]="microsoft-teams"
-    ["Microsoft Word.app"]="microsoft-word"
-    ["Obsidian.app"]="obsidian"
-    ["OneDrive.app"]="onedrive"
-    ["Opera.app"]="opera"
-    ["Perplexity.app"]="perplexity"
-    ["PyCharm.app"]="pycharm"
-    ["Shottr.app"]="shottr"
-    ["Sourcetree.app"]="sourcetree"
-    ["Steam.app"]="steam"
-    ["TG Pro.app"]="tg-pro"
-    ["TextSniper.app"]="textsniper"
-    ["TigerVNC.app"]="tigervnc-viewer"
-    ["Visual Studio Code.app"]="visual-studio-code"
-    ["Warp.app"]="warp"
-    ["WhatsApp.app"]="whatsapp"
-    ["Wondershare UniConverter 16.app"]="wondershare-uniconverter"
-    ["Zed.app"]="zed"
-    ["draw.io.app"]="drawio"
-    ["iStat Menus.app"]="istat-menus"
-    ["iTerm.app"]="iterm2"
-    ["logioptionsplus.app"]="logitech-options-plus"
-)
+# CASK_MAP is loaded from config/cask-map.sh above.
+# For apps not in the map, we try auto-discovery via brew search.
 
-# Apple bundled apps (skip in restore — they come with macOS)
-BUNDLED_APPS="Compressor.app|Final Cut Pro.app|GarageBand.app|iMovie.app|Keynote.app|Logic Pro.app|MainStage.app|Motion.app|Numbers.app|Pages.app|Safari.app|Utilities"
+# Auto-discover bundled apps from /System/Applications (always present on macOS)
+SYSTEM_APPS=""
+if [ -d /System/Applications ]; then
+    SYSTEM_APPS=$(ls -1 /System/Applications/ 2>/dev/null | grep '\.app$' || true)
+fi
+# Also consider apps that come with macOS but live in /Applications
+APPLE_BUNDLED_PATTERN="Safari.app|Utilities"
+
+# Helper: try to find the Homebrew cask name for an app
+_find_cask_name() {
+    local app="$1"
+    # 1. Check the user's CASK_MAP first
+    if [ -n "${CASK_MAP[$app]:-}" ]; then
+        echo "${CASK_MAP[$app]}"
+        return 0
+    fi
+    # 2. Try simple name derivation (lowercase, strip .app, replace spaces with dashes)
+    local guess
+    guess=$(echo "${app%.app}" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+    if brew info --cask "$guess" &>/dev/null; then
+        echo "$guess"
+        return 0
+    fi
+    return 1
+}
+
+# Helper: check if an app is bundled with macOS
+_is_bundled_app() {
+    local app="$1"
+    # Check /System/Applications
+    echo "$SYSTEM_APPS" | grep -qxF "$app" 2>/dev/null && return 0
+    # Check known Apple bundled pattern
+    echo "$app" | grep -qE "^($APPLE_BUNDLED_PATTERN)$" 2>/dev/null && return 0
+    return 1
+}
 
 # Generate Brewfile-addons for apps not currently in Homebrew
 BREWFILE_ADDON="$INV/Brewfile.addon"
 > "$BREWFILE_ADDON"
 
+info "  (auto-discovering Homebrew cask names for apps not in config...)"
 while IFS= read -r app; do
     [ -z "$app" ] && continue
 
-    if echo "$app" | grep -qE "^($BUNDLED_APPS)$"; then
-        echo "mas-or-bundled | $app" >> "$CLASSIFY"
-    elif echo "$BREW_CASKS" | grep -qw "${CASK_MAP[$app]:-__NOMATCH__}" 2>/dev/null; then
-        echo "brew-cask      | $app | ${CASK_MAP[$app]}" >> "$CLASSIFY"
-    elif [ -n "${CASK_MAP[$app]:-}" ]; then
-        # We know the cask name but it wasn't installed via brew — add to addon
-        echo "manual (→brew)  | $app | ${CASK_MAP[$app]}" >> "$CLASSIFY"
-        echo "cask \"${CASK_MAP[$app]}\"" >> "$BREWFILE_ADDON"
-    elif echo "$app" | grep -q "Microsoft"; then
-        echo "manual (→brew)  | $app | (part of microsoft-office or individual cask)" >> "$CLASSIFY"
+    # 1. Check if bundled with macOS
+    if _is_bundled_app "$app"; then
+        echo "bundled        | $app" >> "$CLASSIFY"
+        continue
+    fi
+
+    # 2. Check if it's a Mac App Store app
+    if has mas && echo "$MAS_APPS" | grep -q . 2>/dev/null; then
+        # MAS apps have receipts in /Applications/<app>/Contents/_MASReceipt
+        if [ -d "/Applications/$app/Contents/_MASReceipt" ]; then
+            echo "mas            | $app" >> "$CLASSIFY"
+            continue
+        fi
+    fi
+
+    # 3. Check if already installed via Homebrew cask
+    cask_name=$(_find_cask_name "$app" 2>/dev/null || echo "")
+    if [ -n "$cask_name" ]; then
+        if echo "$BREW_CASKS" | grep -qw "$cask_name" 2>/dev/null; then
+            echo "brew-cask      | $app | $cask_name" >> "$CLASSIFY"
+        else
+            # Known cask but was installed manually — add to addon
+            echo "manual (→brew)  | $app | $cask_name" >> "$CLASSIFY"
+            echo "cask \"$cask_name\"" >> "$BREWFILE_ADDON"
+        fi
     else
         echo "manual         | $app" >> "$CLASSIFY"
     fi
@@ -287,35 +311,23 @@ rmdir "$INV/browser-extensions" 2>/dev/null || true
 info "Scanning application plugins..."
 mkdir -p "$INV/app-plugins"
 
-# JetBrains / PyCharm plugins (user-installed, not built-in)
-PYCHARM_PLUGINS_DIR=$(find "$HOME/Library/Application Support/JetBrains" -maxdepth 2 -path "*/PyCharm*/plugins" -type d 2>/dev/null | sort -V | tail -1)
-if [ -n "$PYCHARM_PLUGINS_DIR" ] && [ -d "$PYCHARM_PLUGINS_DIR" ]; then
-    PYCHARM_PLUGIN_LIST="$INV/app-plugins/pycharm-plugins.txt"
-    ls -1 "$PYCHARM_PLUGINS_DIR" > "$PYCHARM_PLUGIN_LIST" 2>/dev/null
-    if [ -s "$PYCHARM_PLUGIN_LIST" ]; then
-        count=$(wc -l < "$PYCHARM_PLUGIN_LIST" | tr -d ' ')
-        log "PyCharm user plugins ($count)"
-    fi
+# JetBrains IDE plugins (scan all IDEs found)
+if [ -d "$HOME/Library/Application Support/JetBrains" ]; then
+    for ide_dir in "$HOME/Library/Application Support/JetBrains"/*/; do
+        [ -d "$ide_dir/plugins" ] || continue
+        ide_name=$(basename "$ide_dir")
+        PLUGIN_LIST="$INV/app-plugins/${ide_name}-plugins.txt"
+        ls -1 "$ide_dir/plugins" > "$PLUGIN_LIST" 2>/dev/null
+        if [ -s "$PLUGIN_LIST" ]; then
+            count=$(wc -l < "$PLUGIN_LIST" | tr -d ' ')
+            log "$ide_name user plugins ($count)"
+        else
+            rm -f "$PLUGIN_LIST"
+        fi
+    done
 fi
 
-# Also check for other JetBrains IDEs (IntelliJ, WebStorm, GoLand, etc.)
-for ide_dir in "$HOME/Library/Application Support/JetBrains"/*/; do
-    [ -d "$ide_dir/plugins" ] || continue
-    ide_name=$(basename "$ide_dir")
-    # Skip PyCharm (already handled) and non-IDE dirs
-    echo "$ide_name" | grep -qi "pycharm" && continue
-    PLUGIN_LIST="$INV/app-plugins/${ide_name}-plugins.txt"
-    ls -1 "$ide_dir/plugins" > "$PLUGIN_LIST" 2>/dev/null
-    if [ -s "$PLUGIN_LIST" ]; then
-        count=$(wc -l < "$PLUGIN_LIST" | tr -d ' ')
-        log "$ide_name user plugins ($count)"
-    else
-        rm -f "$PLUGIN_LIST"
-    fi
-done
-
 # Obsidian community plugins (scan known vault locations)
-OBSIDIAN_VAULTS_FOUND=0
 OBSIDIAN_PLUGIN_DIR="$INV/app-plugins/obsidian"
 for search_dir in "$HOME/Documents" "$HOME/Desktop" "$HOME" "$HOME/Library/Mobile Documents/iCloud~md~obsidian/Documents"; do
     [ -d "$search_dir" ] || continue
@@ -511,74 +523,43 @@ phase "Application Settings"
 APP="$BACKUP_DIR/app-settings"
 mkdir -p "$APP"
 
-# VS Code
-VSCODE_USER="$HOME/Library/Application Support/Code/User"
-if [ -d "$VSCODE_USER" ]; then
-    mkdir -p "$APP/vscode"
-    for f in settings.json keybindings.json snippets; do
-        [ -e "$VSCODE_USER/$f" ] && cp -a "$VSCODE_USER/$f" "$APP/vscode/"
+# Config-driven app settings backup (loaded from config/app-settings.sh)
+for entry in "${APP_SETTINGS[@]}"; do
+    IFS='|' read -r name src_path backup_subdir files_to_copy <<< "$entry"
+    src_full="$HOME/$src_path"
+
+    # Handle both files and directories
+    if [ -e "$src_full" ]; then
+        mkdir -p "$APP/$backup_subdir"
+        if [ -n "$files_to_copy" ]; then
+            # Copy only specific files
+            for f in $files_to_copy; do
+                [ -e "$src_full/$f" ] && cp -a "$src_full/$f" "$APP/$backup_subdir/" 2>/dev/null
+            done
+        elif [ -d "$src_full" ]; then
+            cp -a "$src_full/"* "$APP/$backup_subdir/" 2>/dev/null
+        else
+            # Single file (like a .plist)
+            cp -a "$src_full" "$APP/$backup_subdir/" 2>/dev/null
+        fi
+        log "$name settings"
+    fi
+done
+
+# JetBrains IDEs (finds latest version of each IDE automatically)
+if [ -d "$HOME/Library/Application Support/JetBrains" ]; then
+    for ide_entry in "${JETBRAINS_IDES[@]}"; do
+        IFS='|' read -r ide_name ide_prefix <<< "$ide_entry"
+        IDE_DIR=$(find "$HOME/Library/Application Support/JetBrains" -maxdepth 1 -name "${ide_prefix}*" -type d 2>/dev/null | sort -V | tail -1)
+        if [ -n "$IDE_DIR" ] && [ -d "$IDE_DIR" ]; then
+            ide_subdir=$(echo "$ide_name" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+            mkdir -p "$APP/$ide_subdir"
+            for subdir in "${JETBRAINS_SUBDIRS[@]}"; do
+                [ -d "$IDE_DIR/$subdir" ] && cp -a "$IDE_DIR/$subdir" "$APP/$ide_subdir/" 2>/dev/null
+            done
+            log "$ide_name settings"
+        fi
     done
-    log "VS Code settings"
-fi
-
-# Cursor
-CURSOR_USER="$HOME/Library/Application Support/Cursor/User"
-if [ -d "$CURSOR_USER" ]; then
-    mkdir -p "$APP/cursor"
-    for f in settings.json keybindings.json snippets; do
-        [ -e "$CURSOR_USER/$f" ] && cp -a "$CURSOR_USER/$f" "$APP/cursor/"
-    done
-    log "Cursor settings"
-fi
-
-# Ghostty
-GHOSTTY_CFG="$HOME/Library/Application Support/com.mitchellh.ghostty"
-if [ -d "$GHOSTTY_CFG" ]; then
-    mkdir -p "$APP/ghostty"
-    cp -a "$GHOSTTY_CFG/"* "$APP/ghostty/" 2>/dev/null && log "Ghostty config"
-fi
-# Also check XDG location
-[ -f "$HOME/.config/ghostty/config" ] && {
-    mkdir -p "$APP/ghostty"
-    cp "$HOME/.config/ghostty/config" "$APP/ghostty/config-xdg" 2>/dev/null
-}
-
-# iTerm2
-ITERM_PREFS="$HOME/Library/Preferences/com.googlecode.iterm2.plist"
-[ -f "$ITERM_PREFS" ] && mkdir -p "$APP/iterm2" && cp "$ITERM_PREFS" "$APP/iterm2/" && log "iTerm2"
-
-# Warp
-WARP_DIR="$HOME/Library/Application Support/dev.warp.Warp-Stable"
-if [ -d "$WARP_DIR" ]; then
-    mkdir -p "$APP/warp"
-    for f in prefs.json keybindings.yaml launch_configurations.yaml; do
-        [ -f "$WARP_DIR/$f" ] && cp "$WARP_DIR/$f" "$APP/warp/" 2>/dev/null
-    done
-    log "Warp terminal settings"
-fi
-
-# JetBrains (PyCharm config)
-PYCHARM_DIR=$(find "$HOME/Library/Application Support/JetBrains" -maxdepth 1 -name "PyCharm*" -type d 2>/dev/null | sort -V | tail -1)
-if [ -n "$PYCHARM_DIR" ] && [ -d "$PYCHARM_DIR" ]; then
-    mkdir -p "$APP/pycharm"
-    for subdir in codestyles colors inspection keymaps options templates; do
-        [ -d "$PYCHARM_DIR/$subdir" ] && cp -a "$PYCHARM_DIR/$subdir" "$APP/pycharm/" 2>/dev/null
-    done
-    log "PyCharm settings"
-fi
-
-# Obsidian (vaults list — not vault content, that's in Documents)
-OBSIDIAN_CFG="$HOME/Library/Application Support/obsidian"
-if [ -d "$OBSIDIAN_CFG" ]; then
-    mkdir -p "$APP/obsidian"
-    cp "$OBSIDIAN_CFG/obsidian.json" "$APP/obsidian/" 2>/dev/null && log "Obsidian config"
-fi
-
-# 1Password (settings, not vault data — that syncs via 1Password account)
-ONEPASS_CFG="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password"
-if [ -d "$ONEPASS_CFG" ]; then
-    info "1Password detected — vault data syncs via your 1Password account"
-    info "  Just sign in on the new Mac"
 fi
 
 # macOS defaults (full export for reference)
@@ -591,20 +572,7 @@ phase "License & Activation Data"
 LIC="$BACKUP_DIR/licenses"
 mkdir -p "$LIC/plists"
 
-# Map of app-name → plist bundle IDs that contain license/registration data
-declare -A LICENSE_PLISTS=(
-    ["BBEdit"]="com.barebones.bbedit"
-    ["Bartender"]="com.surteesstudios.Bartender"
-    ["iStat Menus"]="com.bjango.istatmenus"
-    ["iStat Menus (helper)"]="com.bjango.istatmenus.agent"
-    ["iStat Menus (status)"]="com.bjango.istatmenus.status"
-    ["TG Pro"]="com.tunabellysoftware.tgpro"
-    ["Gemini 2"]="com.macpaw.site.Gemini2"
-    ["Shottr"]="cc.shottr.shottr"
-    ["TextSniper"]="com.TextSniper.TextSniper"
-    ["CrossOver"]="com.codeweavers.CrossOver"
-    ["Sublime Text"]="com.sublimetext.4"
-)
+# LICENSE_PLISTS is loaded from config/license-plists.sh above.
 
 LICENSE_COUNT=0
 for app_name in "${!LICENSE_PLISTS[@]}"; do
@@ -625,8 +593,9 @@ else
 fi
 
 # ── 3c. Migration Manifest ─────────────────────────────────────────────────
-# Generate a manifest that classifies every installed app by migration pattern,
-# so the restore script (and the user) knows exactly what to do for each app.
+# Generate a manifest that classifies every installed app by migration pattern.
+# Uses config/migration-patterns.sh for sign-in apps, and auto-detects the rest
+# from what was actually backed up.
 info "Generating migration manifest..."
 MANIFEST="$BACKUP_DIR/migration-manifest.txt"
 {
@@ -643,74 +612,77 @@ MANIFEST="$BACKUP_DIR/migration-manifest.txt"
     echo "# ═══════════════════════════════════════════════════════════════"
     echo ""
 
-    # Pattern: SIGN-IN (cloud-synced, just need account login)
+    # Pattern: SIGN-IN — from config/migration-patterns.sh
     echo "## SIGN-IN (install + sign into your account)"
     echo "# These apps sync all data and settings via your account."
     echo "# No config files to restore — just sign in after install."
-    for app in "1Password" "OneDrive" "ChatGPT" "Claude" "Codex" "Perplexity" \
-               "Microsoft Word" "Microsoft Excel" "Microsoft PowerPoint" \
-               "Microsoft Outlook" "Microsoft OneNote" "Microsoft Teams" \
-               "WhatsApp"; do
+    for app in "${SIGN_IN_APPS[@]}"; do
         [ -d "/Applications/${app}.app" ] && echo "  $app"
     done
     echo ""
 
-    # Pattern: CONFIG (install + restore config files)
+    # Pattern: CONFIG — auto-detected from what was actually backed up
     echo "## CONFIG (install + restore settings from backup)"
     echo "# These are functional after install but need their config restored."
-    for app_cfg in \
-        "VS Code|app-settings/vscode/" \
-        "Cursor|app-settings/cursor/" \
-        "Ghostty|app-settings/ghostty/" \
-        "iTerm2|app-settings/iterm2/" \
-        "Warp|app-settings/warp/" \
-        "PyCharm|app-settings/pycharm/" \
-        "Obsidian|app-settings/obsidian/" \
-        "Zed|config/dot-config/zed/"; do
-        app="${app_cfg%%|*}"
-        cfg="${app_cfg##*|}"
-        for search_name in "$app" "$(echo "$app" | sed 's/ //')"; do
-            if [ -d "/Applications/${search_name}.app" ] || \
-               [ -d "/Applications/${app}.app" ]; then
-                echo "  $app → $cfg"
-                break
-            fi
-        done 2>/dev/null
+    for entry in "${APP_SETTINGS[@]}"; do
+        IFS='|' read -r name src_path backup_subdir files_to_copy <<< "$entry"
+        [ -d "$APP/$backup_subdir" ] && [ "$(ls -A "$APP/$backup_subdir" 2>/dev/null)" ] && \
+            echo "  $name → app-settings/$backup_subdir/"
+    done
+    # Add any JetBrains IDEs that were backed up
+    for ide_entry in "${JETBRAINS_IDES[@]}"; do
+        IFS='|' read -r ide_name ide_prefix <<< "$ide_entry"
+        ide_subdir=$(echo "$ide_name" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+        [ -d "$APP/$ide_subdir" ] && echo "  $ide_name → app-settings/$ide_subdir/"
     done
     echo ""
 
-    # Pattern: LICENSE-KEY (install + restore plist or re-enter key)
+    # Pattern: LICENSE-KEY — auto-detected from LICENSE_PLISTS that were found
     echo "## LICENSE-KEY (install + restore license plist or re-enter serial)"
     echo "# These apps store license data in ~/Library/Preferences/."
     echo "# Restoring the plist should auto-activate. Keep your keys handy as backup."
-    for app_name in "${!LICENSE_PLISTS[@]}"; do
-        bundle_id="${LICENSE_PLISTS[$app_name]}"
-        if [ -f "$HOME/Library/Preferences/${bundle_id}.plist" ]; then
-            echo "  $app_name → licenses/plists/${bundle_id}.plist"
-        fi
-    done
+    if [ "${#LICENSE_PLISTS[@]}" -gt 0 ]; then
+        for app_name in "${!LICENSE_PLISTS[@]}"; do
+            bundle_id="${LICENSE_PLISTS[$app_name]}"
+            if [ -f "$HOME/Library/Preferences/${bundle_id}.plist" ]; then
+                echo "  $app_name → licenses/plists/${bundle_id}.plist"
+            fi
+        done
+    fi
     echo ""
 
-    # Pattern: RE-DOWNLOAD (install + sign in + reacquire content)
+    # Pattern: RE-DOWNLOAD — from config + auto-detected
     echo "## RE-DOWNLOAD (install + sign in + re-download content)"
     echo "# These manage large content that must be re-acquired after install."
-    [ -d "/Applications/Steam.app" ] && echo "  Steam → sign in, re-download games from library"
-    [ -d "/Applications/CrossOver.app" ] && echo "  CrossOver → restore bottles from backup OR re-download"
-    [ -d "/Applications/Docker.app" ] && echo "  Docker → pull images (docker pull) after install"
+    for rd_entry in "${RE_DOWNLOAD_APPS[@]}"; do
+        IFS='|' read -r rd_app rd_instructions <<< "$rd_entry"
+        [ -d "/Applications/${rd_app}.app" ] && echo "  $rd_app → $rd_instructions"
+    done
     has conda 2>/dev/null && echo "  Anaconda → recreate envs from conda-envs/*.yml"
     echo ""
 
-    # Pattern: EXTENSION (syncs via host app or reinstall from list)
+    # Pattern: EXTENSION — auto-detected from browser-extensions/ and app-plugins/
     echo "## EXTENSION (browser/editor extensions — sync or reinstall from list)"
     echo "# Most sync automatically when you sign into the host app."
     echo "# Extension lists in backup as fallback."
-    [ -d "/Applications/Google Chrome.app" ] && echo "  Chrome extensions → sign into Google account to sync"
-    [ -d "/Applications/Arc.app" ] && echo "  Arc extensions → sign into Arc account to sync"
-    [ -d "/Applications/Opera.app" ] && echo "  Opera extensions → sign into Opera account to sync"
+    # Scan for any Chromium browser extensions we found
+    if [ -d "$INV/browser-extensions" ]; then
+        for ext_file in "$INV/browser-extensions"/*-extensions.txt; do
+            [ -f "$ext_file" ] || continue
+            browser=$(basename "$ext_file" -extensions.txt | sed 's/-/ /g; s/\b\(.\)/\u\1/g')
+            echo "  $browser extensions → sign into account to sync"
+        done
+    fi
+    # Editor extensions
     has code 2>/dev/null && echo "  VS Code extensions → code --install-extension (scripted in restore)"
     has cursor 2>/dev/null && echo "  Cursor extensions → cursor --install-extension (scripted in restore)"
-    echo "  JetBrains plugins → Settings → Plugins in each IDE"
-    echo "  Obsidian community plugins → restored with vault data"
+    # JetBrains and Obsidian plugins
+    if [ -d "$INV/app-plugins" ]; then
+        [ "$(find "$INV/app-plugins" -maxdepth 1 -name '*-plugins.txt' 2>/dev/null | head -1)" ] && \
+            echo "  JetBrains plugins → Settings → Plugins in each IDE"
+        [ -d "$INV/app-plugins/obsidian" ] && \
+            echo "  Obsidian community plugins → restored with vault data"
+    fi
     echo ""
 
 } > "$MANIFEST"

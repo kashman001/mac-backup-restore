@@ -1,7 +1,12 @@
 #!/bin/bash
 # =============================================================================
 # verify.sh — Post-restore verification checklist
-# Run this on the new Mac after restore.sh to confirm everything is working
+#
+# Run on the new Mac after restore.sh to confirm everything is working.
+# Optionally pass the backup path to verify against the backup inventory:
+#   ./scripts/verify.sh /Volumes/YourDrive/mac-backup/20260415_120000
+#
+# Without a backup path, runs generic checks only.
 # =============================================================================
 
 set -euo pipefail
@@ -9,7 +14,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/helpers.sh"
 
+BACKUP="${1:-}"
+
 header "Post-Restore Verification"
+if [ -n "$BACKUP" ] && [ -d "$BACKUP" ]; then
+    info "Verifying against backup: $BACKUP"
+else
+    info "No backup path provided — running generic checks only"
+    info "  Tip: pass the backup path for a more thorough check"
+fi
 
 PASS=0
 FAIL=0
@@ -51,11 +64,11 @@ if [ -d "$HOME/.ssh" ]; then
     check "SSH directory exists" "[ -d ~/.ssh ]"
     check "SSH directory permissions (700)" "[ \$(stat -f '%A' ~/.ssh) = '700' ]"
 
-    if ls ~/.ssh/id_* ~/.ssh/*-GitHub 2>/dev/null | head -1 &>/dev/null; then
-        check "SSH keys present" "ls ~/.ssh/id_* ~/.ssh/*-GitHub 2>/dev/null | head -1"
+    if ls ~/.ssh/id_* 2>/dev/null | head -1 &>/dev/null; then
+        check "SSH keys present" "ls ~/.ssh/id_* 2>/dev/null | head -1"
 
         # Check private key permissions
-        for key in ~/.ssh/id_* ~/.ssh/*-GitHub; do
+        for key in ~/.ssh/id_*; do
             [ -f "$key" ] || continue
             echo "$key" | grep -q '\.pub$' && continue
             PERM=$(stat -f '%A' "$key" 2>/dev/null)
@@ -141,20 +154,41 @@ if has brew; then
     log "$FORMULA_COUNT formulae, $CASK_COUNT casks installed"
     ((PASS++))
 
-    # Check for common expected tools
-    for expected in git gh node python@3.13 ripgrep imagemagick; do
-        if brew list --formula "$expected" &>/dev/null; then
-            log "  brew: $expected"
+    # If backup provided, verify against the Brewfile
+    BREWFILE="$BACKUP/software-inventory/Brewfile"
+    if [ -f "$BREWFILE" ]; then
+        info "Checking Brewfile entries..."
+        MISSING_BREW=0
+        while IFS= read -r line; do
+            case "$line" in
+                brew\ *)
+                    pkg=$(echo "$line" | sed 's/^brew "//;s/".*$//')
+                    if ! brew list --formula "$pkg" &>/dev/null; then
+                        warn "  Missing formula: $pkg"
+                        ((MISSING_BREW++))
+                    fi
+                    ;;
+                cask\ *)
+                    pkg=$(echo "$line" | sed 's/^cask "//;s/".*$//')
+                    if ! brew list --cask "$pkg" &>/dev/null; then
+                        warn "  Missing cask: $pkg"
+                        ((MISSING_BREW++))
+                    fi
+                    ;;
+            esac
+        done < "$BREWFILE"
+        if [ "$MISSING_BREW" -eq 0 ]; then
+            log "All Brewfile entries installed"
             ((PASS++))
+        else
+            err "$MISSING_BREW Brewfile entries missing"
+            ((FAIL++))
         fi
-    done
-
-    for expected in visual-studio-code cursor docker iterm2 ghostty; do
-        if brew list --cask "$expected" &>/dev/null; then
-            log "  cask: $expected"
-            ((PASS++))
-        fi
-    done
+    else
+        # Generic check — just confirm brew is healthy
+        info "No Brewfile to verify against — checking basic health"
+        brew doctor 2>/dev/null | head -3 || true
+    fi
 fi
 
 # ── Directory Structure ──────────────────────────────────────────────────────
@@ -215,71 +249,86 @@ phase "Cloud & Infra"
 [ -d ~/.docker ] && check "Docker config present" "[ -d ~/.docker ]" || skip "Docker config"
 
 # ── Applications ─────────────────────────────────────────────────────────────
-phase "Key Applications"
+phase "Applications"
 
-EXPECTED_APPS=(
-    "1Password.app"
-    "Arc.app"
-    "Claude.app"
-    "Cursor.app"
-    "Docker.app"
-    "Ghostty.app"
-    "Google Chrome.app"
-    "JetBrains Toolbox.app"
-    "Obsidian.app"
-    "Steam.app"
-    "Visual Studio Code.app"
-    "Warp.app"
-    "iTerm.app"
-)
+# If backup provided, verify apps from install-sources.txt
+SOURCES="$BACKUP/software-inventory/install-sources.txt"
+if [ -f "$SOURCES" ]; then
+    info "Checking installed applications against backup inventory..."
+    APP_FOUND=0
+    APP_MISSING=0
+    while IFS='|' read -r source app rest; do
+        # Skip comments and empty lines
+        echo "$source" | grep -q '^#' && continue
+        [ -z "$source" ] && continue
+        app=$(echo "$app" | xargs)
+        [ -z "$app" ] && continue
+        # Skip bundled/system apps
+        echo "$source" | grep -q "bundled" && continue
+        if [ -d "/Applications/$app" ] || [ -d "$HOME/Applications/$app" ]; then
+            ((APP_FOUND++))
+        else
+            warn "  Missing: $app"
+            ((APP_MISSING++))
+        fi
+    done < "$SOURCES"
 
-for app in "${EXPECTED_APPS[@]}"; do
-    if [ -d "/Applications/$app" ]; then
-        log "$app"
+    if [ "$APP_MISSING" -eq 0 ]; then
+        log "All $APP_FOUND applications installed"
         ((PASS++))
     else
-        warn "Missing: $app"
+        err "$APP_MISSING of $((APP_FOUND + APP_MISSING)) applications missing"
         ((FAIL++))
+        info "  Run: cat $SOURCES | grep 'manual' to see apps needing manual install"
+    fi
+else
+    # Generic check — just count what's installed
+    APP_COUNT=$(ls -1 /Applications/ 2>/dev/null | grep -c '\.app$' || echo 0)
+    info "$APP_COUNT applications in /Applications/"
+fi
+
+# ── Extensions & Plugins ─────────────────────────────────────────────────────
+phase "Extensions & Plugins"
+
+# Check any Chromium browser extensions
+for browser_dir in \
+    "$HOME/Library/Application Support/Google/Chrome/Default/Extensions:Chrome" \
+    "$HOME/Library/Application Support/Arc/User Data/Default/Extensions:Arc" \
+    "$HOME/Library/Application Support/com.operasoftware.Opera/Extensions:Opera"; do
+
+    dir="${browser_dir%%:*}"
+    name="${browser_dir##*:}"
+    if [ -d "$dir" ]; then
+        count=$(ls -1d "$dir"/*/ 2>/dev/null | wc -l | tr -d ' ')
+        info "$name: $count extensions installed"
     fi
 done
 
-# ── Browser Extensions & App Plugins ─────────────────────────────────────────
-phase "Extensions & Plugins"
-
-# Chrome extensions
-CHROME_EXT="$HOME/Library/Application Support/Google/Chrome/Default/Extensions"
-if [ -d "$CHROME_EXT" ]; then
-    CHROME_COUNT=$(ls -1d "$CHROME_EXT"/*/ 2>/dev/null | wc -l | tr -d ' ')
-    info "Chrome: $CHROME_COUNT extensions installed"
+# JetBrains IDE plugins
+if [ -d "$HOME/Library/Application Support/JetBrains" ]; then
+    for ide_dir in "$HOME/Library/Application Support/JetBrains"/*/; do
+        [ -d "$ide_dir/plugins" ] || continue
+        ide_name=$(basename "$ide_dir")
+        count=$(ls -1 "$ide_dir/plugins" 2>/dev/null | wc -l | tr -d ' ')
+        [ "$count" -gt 0 ] && info "$ide_name: $count user plugins"
+    done
 fi
 
-# Arc extensions
-ARC_EXT="$HOME/Library/Application Support/Arc/User Data/Default/Extensions"
-if [ -d "$ARC_EXT" ]; then
-    ARC_COUNT=$(ls -1d "$ARC_EXT"/*/ 2>/dev/null | wc -l | tr -d ' ')
-    info "Arc: $ARC_COUNT extensions installed"
-fi
+# ── Steam & Games (only if relevant) ────────────────────────────────────────
+if [ -d "/Applications/Steam.app" ] || [ -d "$HOME/Library/Application Support/Steam" ]; then
+    phase "Steam & Games"
 
-# PyCharm plugins
-PYCHARM_PLUGINS=$(find "$HOME/Library/Application Support/JetBrains" -maxdepth 2 -path "*/PyCharm*/plugins" -type d 2>/dev/null | sort -V | tail -1)
-if [ -n "$PYCHARM_PLUGINS" ] && [ -d "$PYCHARM_PLUGINS" ]; then
-    PC_COUNT=$(ls -1 "$PYCHARM_PLUGINS" 2>/dev/null | wc -l | tr -d ' ')
-    info "PyCharm: $PC_COUNT user plugins installed"
-fi
+    if [ -d "/Applications/Steam.app" ]; then
+        check "Steam installed" "[ -d /Applications/Steam.app ]"
+        STEAM_MANIFESTS=$(ls "$HOME/Library/Application Support/Steam/steamapps"/appmanifest_*.acf 2>/dev/null | wc -l | tr -d ' ')
+        info "$STEAM_MANIFESTS games currently installed in Steam"
+    fi
 
-# ── Steam ────────────────────────────────────────────────────────────────────
-phase "Steam & Games"
-
-if [ -d "/Applications/Steam.app" ]; then
-    check "Steam installed" "[ -d /Applications/Steam.app ]"
-    STEAM_MANIFESTS=$(ls "$HOME/Library/Application Support/Steam/steamapps"/appmanifest_*.acf 2>/dev/null | wc -l | tr -d ' ')
-    info "$STEAM_MANIFESTS games currently installed in Steam"
-fi
-
-if [ -d "/Applications/CrossOver.app" ]; then
-    check "CrossOver installed" "[ -d /Applications/CrossOver.app ]"
-    BOTTLE_COUNT=$(ls "$HOME/Library/Application Support/CrossOver/Bottles/" 2>/dev/null | wc -l | tr -d ' ')
-    info "$BOTTLE_COUNT CrossOver bottles present"
+    if [ -d "/Applications/CrossOver.app" ]; then
+        check "CrossOver installed" "[ -d /Applications/CrossOver.app ]"
+        BOTTLE_COUNT=$(ls "$HOME/Library/Application Support/CrossOver/Bottles/" 2>/dev/null | wc -l | tr -d ' ')
+        info "$BOTTLE_COUNT CrossOver bottles present"
+    fi
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────

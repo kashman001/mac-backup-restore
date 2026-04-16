@@ -25,7 +25,20 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/lib/helpers.sh"
+
+# ── Load user-customizable config ───────────────────────────────────────────
+CONFIG_DIR="$REPO_DIR/config"
+[ -f "$CONFIG_DIR/app-settings.sh" ]       && source "$CONFIG_DIR/app-settings.sh"
+[ -f "$CONFIG_DIR/migration-patterns.sh" ] && source "$CONFIG_DIR/migration-patterns.sh"
+
+# Ensure arrays exist even if config files are missing
+declare -a APP_SETTINGS 2>/dev/null || true
+declare -a SIGN_IN_APPS 2>/dev/null || true
+declare -a JETBRAINS_IDES 2>/dev/null || true
+declare -a JETBRAINS_SUBDIRS 2>/dev/null || true
+[ ${#JETBRAINS_SUBDIRS[@]} -eq 0 ] && JETBRAINS_SUBDIRS=(codestyles colors inspection keymaps options templates)
 
 # ── Validate backup path ────────────────────────────────────────────────────
 BACKUP="${1:-}"
@@ -42,8 +55,8 @@ header "New Mac Setup — Clean Install"
 info "Restoring from: $BACKUP"
 echo ""
 
-# Track what needs manual attention
-MANUAL_TODO="$BACKUP/_manual-todo.txt"
+# Track what needs manual attention (write to HOME, not the backup drive)
+MANUAL_TODO="$HOME/.mac-restore-todo.txt"
 > "$MANUAL_TODO"
 
 # ── Step 0: macOS Preferences ───────────────────────────────────────────────
@@ -218,26 +231,21 @@ phase "JetBrains IDEs"
 
 if [ -d "/Applications/JetBrains Toolbox.app" ]; then
     log "JetBrains Toolbox installed"
-    info "Open JetBrains Toolbox to reinstall PyCharm and other IDEs"
-    info "Your settings sync via JetBrains account"
-
-    # Restore PyCharm settings if available
-    PYCHARM_SRC="$BACKUP/app-settings/pycharm"
-    if [ -d "$PYCHARM_SRC" ]; then
-        confirm "Restore PyCharm settings?" && {
-            # Find the PyCharm config dir (created after first launch)
-            PYCHARM_DEST=$(find "$HOME/Library/Application Support/JetBrains" -maxdepth 1 -name "PyCharm*" -type d 2>/dev/null | sort -V | tail -1)
-            if [ -n "$PYCHARM_DEST" ]; then
-                rsync -a "$PYCHARM_SRC/" "$PYCHARM_DEST/" 2>/dev/null
-                log "PyCharm settings restored"
-            else
-                warn "PyCharm not yet launched — open it first via JetBrains Toolbox, then re-run"
-                echo "  - Restore PyCharm settings after first launch" >> "$MANUAL_TODO"
-            fi
-        }
-    fi
+    info "Open JetBrains Toolbox to reinstall your IDEs"
+    info "IDE settings are restored in Step 9 (Application Settings)"
+    info "Settings also sync via JetBrains account"
 else
-    echo "  - Install JetBrains Toolbox: brew install --cask jetbrains-toolbox" >> "$MANUAL_TODO"
+    # Check if any JetBrains IDE settings exist in backup
+    HAS_JB_SETTINGS=false
+    for ide_entry in "${JETBRAINS_IDES[@]}"; do
+        IFS='|' read -r ide_name ide_prefix <<< "$ide_entry"
+        ide_subdir=$(echo "$ide_name" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+        [ -d "$BACKUP/app-settings/$ide_subdir" ] && HAS_JB_SETTINGS=true && break
+    done
+    if $HAS_JB_SETTINGS; then
+        info "JetBrains IDE settings found in backup but Toolbox not installed"
+        echo "  - Install JetBrains Toolbox: brew install --cask jetbrains-toolbox" >> "$MANUAL_TODO"
+    fi
 fi
 
 # ── Step 7: Steam & Games ───────────────────────────────────────────────────
@@ -279,7 +287,7 @@ if [ -f "$CROSSOVER_GAMES" ] && [ -s "$CROSSOVER_GAMES" ]; then
     else
         info "CrossOver bottles were not backed up"
         info "You'll need to reinstall games through CrossOver after setup"
-        echo "  - Reinstall CrossOver games: Blue Prince, Cyberpunk 2077, Frostpunk 2" >> "$MANUAL_TODO"
+        echo "  - Reinstall CrossOver games (see backup's crossover-games.txt for list)" >> "$MANUAL_TODO"
     fi
 fi
 
@@ -340,7 +348,7 @@ DOT_CONFIG_SRC="$BACKUP/config/dot-config"
 if [ -d "$DOT_CONFIG_SRC" ]; then
     confirm "Restore ~/.config directory?" && {
         rsync -a "$DOT_CONFIG_SRC/" "$HOME/.config/" 2>/dev/null
-        log "~/.config restored (gh, Zed, Ghostty, etc.)"
+        log "~/.config restored"
     }
 fi
 
@@ -349,7 +357,8 @@ for cred_dir in .aws .kube .docker; do
     SRC="$BACKUP/config/$cred_dir"
     if [ -d "$SRC" ]; then
         confirm "Restore $cred_dir config?" && {
-            cp -a "$SRC" "$HOME/$cred_dir" 2>/dev/null
+            mkdir -p "$HOME/$cred_dir"
+            rsync -a "$SRC/" "$HOME/$cred_dir/" 2>/dev/null
             log "$cred_dir config restored"
         }
     fi
@@ -360,91 +369,60 @@ phase "Application Settings"
 
 APP_SRC="$BACKUP/app-settings"
 
-# VS Code
-VSCODE_SRC="$APP_SRC/vscode"
-if [ -d "$VSCODE_SRC" ]; then
-    VSCODE_DEST="$HOME/Library/Application Support/Code/User"
-    confirm "Restore VS Code settings?" && {
-        mkdir -p "$VSCODE_DEST"
-        cp -a "$VSCODE_SRC/"* "$VSCODE_DEST/" 2>/dev/null
-        log "VS Code settings"
+# Config-driven app settings restore (loaded from config/app-settings.sh)
+for entry in "${APP_SETTINGS[@]}"; do
+    IFS='|' read -r name src_path backup_subdir files_to_copy <<< "$entry"
+    SRC="$APP_SRC/$backup_subdir"
+    [ -d "$SRC" ] || [ -f "$SRC" ] || continue
 
-        # Install extensions in parallel
-        EXT_FILE="$BACKUP/software-inventory/vscode-extensions.txt"
-        if [ -f "$EXT_FILE" ] && has code; then
-            info "Installing $(wc -l < "$EXT_FILE" | tr -d ' ') VS Code extensions..."
-            while IFS= read -r ext; do
-                code --install-extension "$ext" --force 2>/dev/null &
-            done < "$EXT_FILE"
-            wait
-            log "VS Code extensions installed"
+    DEST="$HOME/$src_path"
+    confirm "Restore $name settings?" && {
+        if [ -d "$SRC" ]; then
+            mkdir -p "$DEST"
+            cp -a "$SRC/"* "$DEST/" 2>/dev/null
+        else
+            mkdir -p "$(dirname "$DEST")"
+            cp -a "$SRC" "$DEST" 2>/dev/null
         fi
+        log "$name settings"
     }
+done
+
+# JetBrains IDEs (restore settings to matching version directories)
+if [ -d "$HOME/Library/Application Support/JetBrains" ]; then
+    for ide_entry in "${JETBRAINS_IDES[@]}"; do
+        IFS='|' read -r ide_name ide_prefix <<< "$ide_entry"
+        ide_subdir=$(echo "$ide_name" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+        IDE_SRC="$APP_SRC/$ide_subdir"
+        [ -d "$IDE_SRC" ] || continue
+
+        confirm "Restore $ide_name settings?" && {
+            IDE_DEST=$(find "$HOME/Library/Application Support/JetBrains" -maxdepth 1 -name "${ide_prefix}*" -type d 2>/dev/null | sort -V | tail -1)
+            if [ -n "$IDE_DEST" ]; then
+                rsync -a "$IDE_SRC/" "$IDE_DEST/" 2>/dev/null
+                log "$ide_name settings restored"
+            else
+                warn "$ide_name not yet launched — open it first, then re-run"
+                echo "  - Restore $ide_name settings after first launch" >> "$MANUAL_TODO"
+            fi
+        }
+    done
 fi
 
-# Cursor
-CURSOR_SRC="$APP_SRC/cursor"
-if [ -d "$CURSOR_SRC" ]; then
-    CURSOR_DEST="$HOME/Library/Application Support/Cursor/User"
-    confirm "Restore Cursor settings?" && {
-        mkdir -p "$CURSOR_DEST"
-        cp -a "$CURSOR_SRC/"* "$CURSOR_DEST/" 2>/dev/null
-        log "Cursor settings"
-
-        # Install Cursor extensions too
-        CURSOR_EXT="$BACKUP/software-inventory/cursor-extensions.txt"
-        if [ -f "$CURSOR_EXT" ] && has cursor; then
-            info "Installing Cursor extensions..."
-            while IFS= read -r ext; do
-                cursor --install-extension "$ext" --force 2>/dev/null &
-            done < "$CURSOR_EXT"
-            wait
-            log "Cursor extensions installed"
-        fi
-    }
-fi
-
-# Ghostty
-GHOSTTY_SRC="$APP_SRC/ghostty"
-if [ -d "$GHOSTTY_SRC" ]; then
-    confirm "Restore Ghostty config?" && {
-        GHOSTTY_DEST="$HOME/Library/Application Support/com.mitchellh.ghostty"
-        mkdir -p "$GHOSTTY_DEST"
-        cp -a "$GHOSTTY_SRC/"* "$GHOSTTY_DEST/" 2>/dev/null
-        log "Ghostty config"
-    }
-fi
-
-# iTerm2
-ITERM_SRC="$APP_SRC/iterm2/com.googlecode.iterm2.plist"
-if [ -f "$ITERM_SRC" ]; then
-    confirm "Restore iTerm2 preferences?" && {
-        cp "$ITERM_SRC" "$HOME/Library/Preferences/" 2>/dev/null
-        log "iTerm2 preferences"
-    }
-fi
-
-# Warp
-WARP_SRC="$APP_SRC/warp"
-if [ -d "$WARP_SRC" ]; then
-    confirm "Restore Warp terminal settings?" && {
-        WARP_DEST="$HOME/Library/Application Support/dev.warp.Warp-Stable"
-        mkdir -p "$WARP_DEST"
-        cp -a "$WARP_SRC/"* "$WARP_DEST/" 2>/dev/null
-        log "Warp terminal settings"
-    }
-fi
-
-# Obsidian
-OBSIDIAN_SRC="$APP_SRC/obsidian"
-if [ -d "$OBSIDIAN_SRC" ]; then
-    confirm "Restore Obsidian config?" && {
-        OBSIDIAN_DEST="$HOME/Library/Application Support/obsidian"
-        mkdir -p "$OBSIDIAN_DEST"
-        cp -a "$OBSIDIAN_SRC/"* "$OBSIDIAN_DEST/" 2>/dev/null
-        log "Obsidian config"
-    }
-fi
+# Install VS Code / Cursor extensions from backup lists (in parallel)
+for editor in code cursor; do
+    EXT_FILE="$BACKUP/software-inventory/${editor}-extensions.txt"
+    [ "$editor" = "code" ] && EXT_FILE="$BACKUP/software-inventory/vscode-extensions.txt"
+    if [ -f "$EXT_FILE" ] && has "$editor"; then
+        EXT_COUNT=$(wc -l < "$EXT_FILE" | tr -d ' ')
+        info "Installing $EXT_COUNT $editor extensions..."
+        while IFS= read -r ext; do
+            "$editor" --install-extension "$ext" --force 2>/dev/null &
+        done < "$EXT_FILE"
+        wait
+        log "$editor extensions installed"
+    fi
+done
 
 # ── Step 10: License Keys & Activation ──────────────────────────────────────
 phase "License Keys & Activation"
@@ -568,11 +546,12 @@ if [ -d "$PROJ_SRC" ] && [ "$(ls -A "$PROJ_SRC" 2>/dev/null | grep -v '^_')" ]; 
     info ""
     info "On the old Mac, projects were scattered across:"
 
-    # Show where projects came from
+    # Show where projects came from (detect old home dir from paths)
     LIST="$PROJ_SRC/_project-list.txt"
     if [ -f "$LIST" ]; then
-        cat "$LIST" | sed "s|$HOME/||" | cut -d/ -f1 | sort | uniq -c | sort -rn | \
-            sed 's/^/    /'
+        # Strip any /Users/<name>/ prefix (handles username changes between machines)
+        sed 's|^/Users/[^/]*/||; s|^/home/[^/]*/||' "$LIST" | \
+            cut -d/ -f1 | sort | uniq -c | sort -rn | sed 's/^/    /'
         echo ""
     fi
 
@@ -761,7 +740,7 @@ if [ -d "$FILES_SRC" ]; then
 fi
 
 # ── Step 15: Anaconda / Conda Environments ───────────────────────────────────
-phase "Python & Conda"
+phase "Language Package Managers"
 
 CONDA_ENVS="$BACKUP/software-inventory/conda-envs"
 if [ -d "$CONDA_ENVS" ] && [ "$(ls -A "$CONDA_ENVS")" ]; then
@@ -796,6 +775,72 @@ if [ -f "$NPM_FILE" ] && has npm; then
         grep -E '├──|└──' "$NPM_FILE" | awk '{print $2}' | cut -d@ -f1 | \
             xargs -I{} npm install -g {} 2>/dev/null
         log "npm globals installed"
+    }
+fi
+
+# pip3 packages (user-installed only)
+PIP_FILE="$BACKUP/software-inventory/pip3-packages.txt"
+if [ -f "$PIP_FILE" ] && has pip3; then
+    PIP_COUNT=$(wc -l < "$PIP_FILE" | tr -d ' ')
+    info "pip3 packages from backup ($PIP_COUNT packages)"
+    info "  Recommendation: use virtual environments instead of global pip install"
+    confirm "Reinstall pip3 packages globally?" && {
+        pip3 install --break-system-packages -r "$PIP_FILE" 2>/dev/null || \
+            pip3 install -r "$PIP_FILE" 2>/dev/null
+        log "pip3 packages installed"
+    }
+fi
+
+# pipx packages (isolated CLI tools)
+PIPX_FILE="$BACKUP/software-inventory/pipx-packages.json"
+if [ -f "$PIPX_FILE" ] && has pipx; then
+    info "pipx packages from backup:"
+    python3 -c "
+import json, sys
+data = json.load(open('$PIPX_FILE'))
+for pkg in data.get('venvs', {}):
+    print(f'    {pkg}')
+" 2>/dev/null
+    confirm "Reinstall pipx packages?" && {
+        python3 -c "
+import json
+data = json.load(open('$PIPX_FILE'))
+for pkg in data.get('venvs', {}):
+    print(pkg)
+" 2>/dev/null | while read -r pkg; do
+            pipx install "$pkg" 2>/dev/null && log "  $pkg" || warn "  Failed: $pkg"
+        done
+    }
+elif [ -f "$PIPX_FILE" ]; then
+    info "pipx packages found in backup but pipx not installed"
+    info "  Install with: brew install pipx && pipx ensurepath"
+fi
+
+# Cargo packages (Rust)
+CARGO_FILE="$BACKUP/software-inventory/cargo-packages.txt"
+if [ -f "$CARGO_FILE" ] && has cargo; then
+    CARGO_COUNT=$(grep -c '^[a-z]' "$CARGO_FILE" 2>/dev/null || echo 0)
+    info "Cargo packages from backup ($CARGO_COUNT packages)"
+    confirm "Reinstall Cargo packages?" && {
+        grep '^[a-z]' "$CARGO_FILE" | awk '{print $1}' | sed 's/:$//' | while read -r pkg; do
+            cargo install "$pkg" 2>/dev/null && log "  $pkg" || warn "  Failed: $pkg"
+        done
+    }
+fi
+
+# Ruby gems
+GEM_FILE="$BACKUP/software-inventory/ruby-gems.txt"
+if [ -f "$GEM_FILE" ] && has gem; then
+    GEM_COUNT=$(wc -l < "$GEM_FILE" | tr -d ' ')
+    info "Ruby gems from backup ($GEM_COUNT gems)"
+    info "  Note: system gems are managed by macOS — only user gems will be reinstalled"
+    confirm "Reinstall Ruby gems?" && {
+        while IFS= read -r line; do
+            name=$(echo "$line" | awk '{print $1}')
+            [ -z "$name" ] && continue
+            gem install "$name" 2>/dev/null
+        done < "$GEM_FILE"
+        log "Ruby gems installed"
     }
 fi
 
@@ -839,30 +884,34 @@ info "What the restore script handled automatically:"
 echo "    ✓ Homebrew packages and casks (including migrated manual installs)"
 echo "    ✓ Mac App Store apps"
 echo "    ✓ Dotfiles, SSH keys, GPG keys, cloud credentials"
-echo "    ✓ App settings (VS Code, Cursor, Ghostty, iTerm2, Warp, Obsidian)"
-echo "    ✓ License plists (BBEdit, Bartender, iStat Menus, etc.)"
+echo "    ✓ App settings (from config/app-settings.sh)"
+echo "    ✓ License plists for registered apps"
 echo "    ✓ Projects → ~/Developer/"
 echo "    ✓ Screenshots → ~/Pictures/Screenshots/"
-echo "    ✓ Conda environments, npm globals"
+echo "    ✓ Conda environments, npm/pip/pipx/cargo/gem packages"
 echo ""
 
 info "Sign-in apps — open each and log into your account:"
 echo "    1. Apple ID → System Settings → sign in → iCloud syncs Documents/Desktop"
-echo "    2. App Store → sign in → redownload purchased apps (Final Cut Pro, etc.)"
-echo "    3. 1Password → sign into your 1Password account"
-echo "    4. Microsoft 365 → open any Office app → sign in (activates all Office apps)"
-echo "    5. Browsers → sign into Chrome/Arc/Opera → extensions sync automatically"
-echo "    6. OneDrive → sign in → files sync"
-echo "    7. Steam → sign in → redownload games from your library"
-echo "    8. JetBrains Toolbox → sign in → install PyCharm → Settings → Plugins"
-echo "    9. ChatGPT / Claude / Perplexity → sign in"
+echo "    2. App Store → sign in → redownload purchased apps"
+# Dynamically list sign-in apps that are actually installed
+STEP_NUM=3
+for app in "${SIGN_IN_APPS[@]}"; do
+    if [ -d "/Applications/${app}.app" ]; then
+        printf "    %d. %s → sign in\n" "$STEP_NUM" "$app"
+        ((STEP_NUM++))
+    fi
+done
+# Always remind about browsers for extension sync
+echo "    $STEP_NUM. Browsers → sign in → extensions sync automatically"
+((STEP_NUM++))
 echo ""
 
 info "Verify and organize:"
-echo "   10. Test SSH: ssh -T git@github.com"
-echo "   11. Sort ~/Developer/personal/ into work/ and oss/"
-echo "   12. Launch license-key apps (BBEdit, Bartender, etc.) to confirm activation"
-echo "   13. Run ./scripts/verify.sh to check everything"
+printf "   %d. Test SSH: ssh -T git@github.com\n" "$STEP_NUM"; ((STEP_NUM++))
+printf "   %d. Sort ~/Developer/personal/ into work/ and oss/\n" "$STEP_NUM"; ((STEP_NUM++))
+printf "   %d. Launch license-key apps to confirm activation\n" "$STEP_NUM"; ((STEP_NUM++))
+printf "   %d. Run ./scripts/verify.sh to check everything\n" "$STEP_NUM"
 echo ""
 
 if [ -f "$BACKUP/migration-manifest.txt" ]; then
