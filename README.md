@@ -296,7 +296,7 @@ Cloud-native data (anything in iCloud, OneDrive, 1Password) will re-sync when yo
 
 ## How to Use: Backup
 
-Run this on your current Mac before migrating.
+Run this on your current (old) Mac before migrating.
 
 ### Prerequisites
 
@@ -305,12 +305,30 @@ The only hard requirement is bash (which ships with macOS). For a complete backu
 ### Running
 
 ```bash
-git clone https://github.com/<you>/mac-backup-restore.git
+git clone https://github.com/kashman001/mac-backup-restore.git
 cd mac-backup-restore
 ./scripts/backup.sh /Volumes/YourDrive
 ```
 
 If you run it without arguments, it prints available volumes to help you find your drive's mount point.
+
+### Getting scripts onto the new Mac
+
+You do not need git or internet access on the new Mac. The backup script automatically copies the entire toolkit onto the external drive at the end of every backup run. When the backup finishes, your drive will contain:
+
+```
+/Volumes/YourDrive/
+├── mac-backup/
+│   └── 20260415_120000/     ← your backup data
+└── mac-backup-restore/      ← the toolkit, ready to run
+    ├── scripts/
+    │   ├── backup.sh
+    │   ├── restore.sh
+    │   └── verify.sh
+    └── config/
+```
+
+The summary at the end of backup prints the exact command to copy and paste on the new Mac.
 
 ### What happens
 
@@ -334,23 +352,25 @@ After all phases, it prints a summary with total size, breakdown by directory, a
 
 ## How to Use: Restore
 
-Run this on your new Mac after completing the initial macOS setup wizard (skip Migration Assistant).
+Run this on your new Mac after completing the initial macOS setup wizard (skip Migration Assistant when prompted).
 
 ### Prerequisites
 
-You need Xcode command line tools for git:
-
-```bash
-xcode-select --install
-```
-
-Then clone this repo or copy it from the backup drive.
+Nothing. The script installs Homebrew itself in Step 2. macOS ships with bash and curl pre-installed, which is all that's needed to start. Do not install Xcode Command Line Tools or anything else manually first — the restore script handles the full setup from zero.
 
 ### Running
 
+Plug in the external drive. Open Terminal (it's in /Applications/Utilities). The backup script printed the exact command when it finished, but the pattern is always:
+
 ```bash
-cd mac-backup-restore
-./scripts/restore.sh /Volumes/YourDrive/mac-backup/20260415_120000
+bash /Volumes/YourDrive/mac-backup-restore/scripts/restore.sh \
+     /Volumes/YourDrive/mac-backup/20260415_120000
+```
+
+Replace `YourDrive` with your drive name and the timestamp with your backup folder name. If you're not sure of the timestamp, list what's on the drive:
+
+```bash
+ls /Volumes/YourDrive/mac-backup/
 ```
 
 If you point it at the drive root instead of a specific timestamp, it lists available backups.

@@ -1017,6 +1017,19 @@ if [ -d "$HOME/Library/LaunchAgents" ] && [ "$(ls -A "$HOME/Library/LaunchAgents
     cp -a "$HOME/Library/LaunchAgents" "$SYS/LaunchAgents" 2>/dev/null && log "Launch Agents"
 fi
 
+# ── 7. Copy this toolkit onto the drive ─────────────────────────────────────
+# So the new Mac can run restore.sh directly from the drive without needing
+# git, internet, or anything pre-installed.
+phase "Packaging Restore Toolkit"
+TOOLKIT_DEST="$DRIVE/mac-backup-restore"
+info "Copying restore toolkit to drive so you can run it on the new Mac..."
+rsync -a --delete \
+    --exclude='.git' \
+    --exclude='*.DS_Store' \
+    "$REPO_DIR/" "$TOOLKIT_DEST/" 2>/dev/null
+chmod +x "$TOOLKIT_DEST/scripts/"*.sh "$TOOLKIT_DEST/scripts/lib/"*.sh 2>/dev/null || true
+log "Toolkit copied → $TOOLKIT_DEST"
+
 # ── Summary ──────────────────────────────────────────────────────────────────
 echo ""
 header "Backup Complete"
@@ -1034,5 +1047,9 @@ echo "    Brewfile:          $INV/Brewfile"
 echo "    Brewfile.addon:    $INV/Brewfile.addon"
 echo "    Install sources:   $INV/install-sources.txt"
 echo "    Steam games:       $INV/steam/installed-games.txt"
+echo ""
+info "To restore on the new Mac, plug in this drive and run:"
+echo ""
+echo "    bash $TOOLKIT_DEST/scripts/restore.sh $BACKUP_DIR"
 echo ""
 sensitive "This backup contains SSH keys, GPG keys, and credentials. Keep it secure."
