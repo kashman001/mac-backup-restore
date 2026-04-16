@@ -807,6 +807,75 @@ if [ -d "$HOME/Library/Mobile Documents/com~apple~CloudDocs" ]; then
     echo ""
 fi
 
+# ── 5a-pre. Detect other cloud sync folders ──────────────────────────────────
+# OneDrive, Google Drive, Dropbox, Box sync locally but are already safe in the
+# cloud. They'll re-sync automatically on the new Mac, so we skip them by default.
+# Files may also be online-only stubs (not fully downloaded), same as iCloud.
+info "Checking for other cloud sync folders..."
+CLOUD_SYNC_DIRS=()
+CLOUD_SYNC_NAMES=()
+
+# OneDrive — ~/Library/CloudStorage/OneDrive-* or ~/OneDrive
+for od_dir in \
+    "$HOME/Library/CloudStorage"/OneDrive-* \
+    "$HOME/OneDrive" \
+    "$HOME/OneDrive - "*; do
+    [ -d "$od_dir" ] || continue
+    CLOUD_SYNC_DIRS+=("$od_dir")
+    CLOUD_SYNC_NAMES+=("OneDrive")
+done
+
+# Google Drive — ~/Library/CloudStorage/GoogleDrive-*
+for gd_dir in "$HOME/Library/CloudStorage"/GoogleDrive-*; do
+    [ -d "$gd_dir" ] || continue
+    CLOUD_SYNC_DIRS+=("$gd_dir")
+    CLOUD_SYNC_NAMES+=("Google Drive ($(basename "$gd_dir" | sed 's/GoogleDrive-//'))")
+done
+
+# Dropbox
+[ -d "$HOME/Dropbox" ] && {
+    CLOUD_SYNC_DIRS+=("$HOME/Dropbox")
+    CLOUD_SYNC_NAMES+=("Dropbox")
+}
+
+# Box
+for box_dir in "$HOME/Box" "$HOME/Library/CloudStorage"/Box-*; do
+    [ -d "$box_dir" ] || continue
+    CLOUD_SYNC_DIRS+=("$box_dir")
+    CLOUD_SYNC_NAMES+=("Box")
+done
+
+if [ ${#CLOUD_SYNC_DIRS[@]} -gt 0 ]; then
+    info "Cloud sync folders found:"
+    for i in "${!CLOUD_SYNC_DIRS[@]}"; do
+        SIZE=$(du -sh "${CLOUD_SYNC_DIRS[$i]}" 2>/dev/null | cut -f1)
+        echo "    ${CLOUD_SYNC_NAMES[$i]} → ${CLOUD_SYNC_DIRS[$i]} ($SIZE)"
+    done
+    echo ""
+    warn "Skipping cloud sync folders — they will re-sync automatically on the new Mac."
+    warn "Files may be online-only stubs (not fully downloaded locally)."
+    echo ""
+    confirm "Include cloud sync folders in backup anyway? (may be large — belt-and-suspenders)" && {
+        mkdir -p "$FILES/cloud-sync"
+        for i in "${!CLOUD_SYNC_DIRS[@]}"; do
+            dir="${CLOUD_SYNC_DIRS[$i]}"
+            name="${CLOUD_SYNC_NAMES[$i]}"
+            SIZE=$(du -sh "$dir" 2>/dev/null | cut -f1)
+            confirm "  Back up $name ($SIZE)?" && {
+                dest=$(echo "$name" | tr ' ()/' '----' | tr -s '-' | sed 's/-*$//')
+                rsync -a --progress \
+                    --exclude='.DS_Store' \
+                    "$dir/" "$FILES/cloud-sync/$dest/" 2>/dev/null
+                log "$name backed up to cloud-sync/$dest/"
+            }
+        done
+    }
+    echo ""
+else
+    info "No other cloud sync folders found"
+    echo ""
+fi
+
 # ── 5a. Screenshots — organized by date
 info "Scanning for screenshots..."
 SCREENSHOTS_DIR="$FILES/Screenshots"
@@ -1004,6 +1073,52 @@ if [ "$PHOTO_COUNT" -gt 0 ]; then
     echo ""
     info "Found $PHOTO_COUNT loose photos on Desktop (not screenshots)"
     info "These will be moved to ~/Pictures/ during restore"
+fi
+
+# ── 5f. Network Drives ───────────────────────────────────────────────────────
+# Network drives mount at /Volumes/ (outside $HOME) so they are not scanned by
+# any of the steps above. Detect them and offer to include their contents.
+phase "Network Drives"
+NET_DRIVES=()
+
+# Parse mount output for network file systems (SMB, AFP, NFS, WebDAV)
+while IFS= read -r mount_line; do
+    mount_path=$(echo "$mount_line" | awk '{print $3}')
+    mount_from=$(echo "$mount_line" | awk '{print $1}')
+    # Skip the backup destination drive itself
+    [[ "$mount_path" == "$DRIVE"* ]] && continue
+    [ -d "$mount_path" ] || continue
+    NET_DRIVES+=("$mount_path|$mount_from")
+done < <(mount 2>/dev/null | grep -E '^(afp|smb|nfs|cifs|webdav)://')
+
+if [ ${#NET_DRIVES[@]} -gt 0 ]; then
+    info "Network drives currently mounted:"
+    for nd in "${NET_DRIVES[@]}"; do
+        IFS='|' read -r nd_path nd_from <<< "$nd"
+        SIZE=$(du -sh "$nd_path" 2>/dev/null | cut -f1)
+        echo "    $(basename "$nd_path") ($nd_from) — $SIZE"
+    done
+    echo ""
+    info "Network drives typically reconnect automatically on the new Mac (same network)."
+    info "Back up their contents only if the server won't be accessible during the migration,"
+    info "or if you want a local snapshot of the data."
+    echo ""
+    confirm "Include network drive contents in backup?" && {
+        for nd in "${NET_DRIVES[@]}"; do
+            IFS='|' read -r nd_path nd_from <<< "$nd"
+            nd_name=$(basename "$nd_path")
+            SIZE=$(du -sh "$nd_path" 2>/dev/null | cut -f1)
+            confirm "  Back up $nd_name ($SIZE from $nd_from)?" && {
+                mkdir -p "$FILES/network-drives/$nd_name"
+                rsync -a --progress \
+                    --exclude='.DS_Store' \
+                    "$nd_path/" "$FILES/network-drives/$nd_name/" 2>/dev/null
+                log "Network drive: $nd_name"
+            }
+        done
+    }
+else
+    info "No network drives found"
 fi
 
 # ── 6. System ───────────────────────────────────────────────────────────────
