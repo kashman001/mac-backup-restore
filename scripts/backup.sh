@@ -584,6 +584,140 @@ fi
 # macOS defaults (full export for reference)
 defaults read > "$APP/macos-defaults-full.txt" 2>/dev/null && log "macOS defaults (full)"
 
+# ── 3b. License & Activation Data ──────────────────────────────────────────
+# Some apps store license keys in preference plists. Copying these to the new
+# Mac avoids having to re-enter serial numbers.
+phase "License & Activation Data"
+LIC="$BACKUP_DIR/licenses"
+mkdir -p "$LIC/plists"
+
+# Map of app-name → plist bundle IDs that contain license/registration data
+declare -A LICENSE_PLISTS=(
+    ["BBEdit"]="com.barebones.bbedit"
+    ["Bartender"]="com.surteesstudios.Bartender"
+    ["iStat Menus"]="com.bjango.istatmenus"
+    ["iStat Menus (helper)"]="com.bjango.istatmenus.agent"
+    ["iStat Menus (status)"]="com.bjango.istatmenus.status"
+    ["TG Pro"]="com.tunabellysoftware.tgpro"
+    ["Gemini 2"]="com.macpaw.site.Gemini2"
+    ["Shottr"]="cc.shottr.shottr"
+    ["TextSniper"]="com.TextSniper.TextSniper"
+    ["CrossOver"]="com.codeweavers.CrossOver"
+    ["Sublime Text"]="com.sublimetext.4"
+)
+
+LICENSE_COUNT=0
+for app_name in "${!LICENSE_PLISTS[@]}"; do
+    bundle_id="${LICENSE_PLISTS[$app_name]}"
+    plist="$HOME/Library/Preferences/${bundle_id}.plist"
+    if [ -f "$plist" ]; then
+        cp "$plist" "$LIC/plists/" 2>/dev/null
+        log "$app_name license plist (${bundle_id})"
+        ((LICENSE_COUNT++))
+    fi
+done
+
+if [ "$LICENSE_COUNT" -gt 0 ]; then
+    info "$LICENSE_COUNT license plists backed up"
+    sensitive "These contain license keys — keep secure"
+else
+    info "No license plists found"
+fi
+
+# ── 3c. Migration Manifest ─────────────────────────────────────────────────
+# Generate a manifest that classifies every installed app by migration pattern,
+# so the restore script (and the user) knows exactly what to do for each app.
+info "Generating migration manifest..."
+MANIFEST="$BACKUP_DIR/migration-manifest.txt"
+{
+    echo "# ═══════════════════════════════════════════════════════════════"
+    echo "# Migration Manifest — generated $(date)"
+    echo "#"
+    echo "# Each app is classified by how it should be restored:"
+    echo "#   SIGN-IN     → install binary, sign into account, everything syncs"
+    echo "#   CONFIG      → install binary, restore config files from backup"
+    echo "#   LICENSE-KEY  → install binary, restore license plist (or re-enter key)"
+    echo "#   RE-DOWNLOAD → install binary, sign in, re-download content"
+    echo "#   EXTENSION   → host app handles it (sync or reinstall from list)"
+    echo "#   BREW-AUTO   → fully automated via brew bundle"
+    echo "# ═══════════════════════════════════════════════════════════════"
+    echo ""
+
+    # Pattern: SIGN-IN (cloud-synced, just need account login)
+    echo "## SIGN-IN (install + sign into your account)"
+    echo "# These apps sync all data and settings via your account."
+    echo "# No config files to restore — just sign in after install."
+    for app in "1Password" "OneDrive" "ChatGPT" "Claude" "Codex" "Perplexity" \
+               "Microsoft Word" "Microsoft Excel" "Microsoft PowerPoint" \
+               "Microsoft Outlook" "Microsoft OneNote" "Microsoft Teams" \
+               "WhatsApp"; do
+        [ -d "/Applications/${app}.app" ] && echo "  $app"
+    done
+    echo ""
+
+    # Pattern: CONFIG (install + restore config files)
+    echo "## CONFIG (install + restore settings from backup)"
+    echo "# These are functional after install but need their config restored."
+    for app_cfg in \
+        "VS Code|app-settings/vscode/" \
+        "Cursor|app-settings/cursor/" \
+        "Ghostty|app-settings/ghostty/" \
+        "iTerm2|app-settings/iterm2/" \
+        "Warp|app-settings/warp/" \
+        "PyCharm|app-settings/pycharm/" \
+        "Obsidian|app-settings/obsidian/" \
+        "Zed|config/dot-config/zed/"; do
+        app="${app_cfg%%|*}"
+        cfg="${app_cfg##*|}"
+        for search_name in "$app" "$(echo "$app" | sed 's/ //')"; do
+            if [ -d "/Applications/${search_name}.app" ] || \
+               [ -d "/Applications/${app}.app" ]; then
+                echo "  $app → $cfg"
+                break
+            fi
+        done 2>/dev/null
+    done
+    echo ""
+
+    # Pattern: LICENSE-KEY (install + restore plist or re-enter key)
+    echo "## LICENSE-KEY (install + restore license plist or re-enter serial)"
+    echo "# These apps store license data in ~/Library/Preferences/."
+    echo "# Restoring the plist should auto-activate. Keep your keys handy as backup."
+    for app_name in "${!LICENSE_PLISTS[@]}"; do
+        bundle_id="${LICENSE_PLISTS[$app_name]}"
+        if [ -f "$HOME/Library/Preferences/${bundle_id}.plist" ]; then
+            echo "  $app_name → licenses/plists/${bundle_id}.plist"
+        fi
+    done
+    echo ""
+
+    # Pattern: RE-DOWNLOAD (install + sign in + reacquire content)
+    echo "## RE-DOWNLOAD (install + sign in + re-download content)"
+    echo "# These manage large content that must be re-acquired after install."
+    [ -d "/Applications/Steam.app" ] && echo "  Steam → sign in, re-download games from library"
+    [ -d "/Applications/CrossOver.app" ] && echo "  CrossOver → restore bottles from backup OR re-download"
+    [ -d "/Applications/Docker.app" ] && echo "  Docker → pull images (docker pull) after install"
+    has conda 2>/dev/null && echo "  Anaconda → recreate envs from conda-envs/*.yml"
+    echo ""
+
+    # Pattern: EXTENSION (syncs via host app or reinstall from list)
+    echo "## EXTENSION (browser/editor extensions — sync or reinstall from list)"
+    echo "# Most sync automatically when you sign into the host app."
+    echo "# Extension lists in backup as fallback."
+    [ -d "/Applications/Google Chrome.app" ] && echo "  Chrome extensions → sign into Google account to sync"
+    [ -d "/Applications/Arc.app" ] && echo "  Arc extensions → sign into Arc account to sync"
+    [ -d "/Applications/Opera.app" ] && echo "  Opera extensions → sign into Opera account to sync"
+    has code 2>/dev/null && echo "  VS Code extensions → code --install-extension (scripted in restore)"
+    has cursor 2>/dev/null && echo "  Cursor extensions → cursor --install-extension (scripted in restore)"
+    echo "  JetBrains plugins → Settings → Plugins in each IDE"
+    echo "  Obsidian community plugins → restored with vault data"
+    echo ""
+
+} > "$MANIFEST"
+
+log "Migration manifest → migration-manifest.txt"
+info "Review this file to see exactly what each app needs on the new Mac"
+
 # ── 4. Project Discovery ────────────────────────────────────────────────────
 phase "Project Discovery"
 PROJ="$BACKUP_DIR/projects"

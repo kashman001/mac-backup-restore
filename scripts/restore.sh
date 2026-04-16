@@ -446,7 +446,40 @@ if [ -d "$OBSIDIAN_SRC" ]; then
     }
 fi
 
-# ── Step 10: Browser Extensions & App Plugins ──────────────────────────────
+# ── Step 10: License Keys & Activation ──────────────────────────────────────
+phase "License Keys & Activation"
+
+LIC_SRC="$BACKUP/licenses/plists"
+if [ -d "$LIC_SRC" ] && [ "$(ls -A "$LIC_SRC" 2>/dev/null)" ]; then
+    info "License plists from backup (these contain serial numbers / activation data):"
+    for plist in "$LIC_SRC"/*.plist; do
+        [ -f "$plist" ] || continue
+        bundle_id=$(basename "$plist" .plist)
+        echo "    $bundle_id"
+    done
+    echo ""
+    confirm "Restore license plists to ~/Library/Preferences/?" && {
+        for plist in "$LIC_SRC"/*.plist; do
+            [ -f "$plist" ] || continue
+            bundle_id=$(basename "$plist" .plist)
+            cp "$plist" "$HOME/Library/Preferences/" 2>/dev/null && \
+                log "  $bundle_id"
+        done
+        info "Apps should auto-activate when launched. If not, re-enter your license key."
+    }
+else
+    info "No license plists found in backup"
+fi
+
+# Show migration manifest if available
+MANIFEST="$BACKUP/migration-manifest.txt"
+if [ -f "$MANIFEST" ]; then
+    echo ""
+    info "Migration manifest available at: $MANIFEST"
+    info "It classifies every app by what it needs (sign-in, config, license, etc.)"
+fi
+
+# ── Step 11: Browser Extensions & App Plugins ──────────────────────────────
 phase "Browser Extensions & App Plugins"
 
 BROWSER_EXT="$BACKUP/software-inventory/browser-extensions"
@@ -504,7 +537,7 @@ if [ -d "$APP_PLUGINS" ] && [ "$(ls -A "$APP_PLUGINS" 2>/dev/null)" ]; then
     echo "  - Reinstall JetBrains IDE plugins (see plugin lists in backup)" >> "$MANUAL_TODO"
 fi
 
-# ── Step 11: Screenshots → ~/Pictures/Screenshots/YYYY/MM/ ──────────────────
+# ── Step 12: Screenshots → ~/Pictures/Screenshots/YYYY/MM/ ──────────────────
 phase "Screenshots"
 
 SCREENSHOTS_SRC="$BACKUP/files/Screenshots"
@@ -526,7 +559,7 @@ else
     info "No screenshots found in backup"
 fi
 
-# ── Step 12: Projects → ~/Developer/ ────────────────────────────────────────
+# ── Step 13: Projects → ~/Developer/ ────────────────────────────────────────
 phase "Projects → Clean Layout"
 
 PROJ_SRC="$BACKUP/projects"
@@ -578,7 +611,7 @@ else
     info "No projects found in backup"
 fi
 
-# ── Step 13: Personal Files ──────────────────────────────────────────────────
+# ── Step 14: Personal Files ──────────────────────────────────────────────────
 phase "Personal Files"
 
 info "Note: if you sign into iCloud, Documents and Desktop will sync automatically."
@@ -600,7 +633,7 @@ if [ -d "$FILES_SRC" ]; then
     done
 fi
 
-# ── Step 14: Anaconda / Conda Environments ───────────────────────────────────
+# ── Step 15: Anaconda / Conda Environments ───────────────────────────────────
 phase "Python & Conda"
 
 CONDA_ENVS="$BACKUP/software-inventory/conda-envs"
@@ -639,7 +672,7 @@ if [ -f "$NPM_FILE" ] && has npm; then
     }
 fi
 
-# ── Step 15: System Config ───────────────────────────────────────────────────
+# ── Step 16: System Config ───────────────────────────────────────────────────
 phase "System Config"
 
 SYS_SRC="$BACKUP/system"
@@ -675,16 +708,42 @@ if [ -s "$MANUAL_TODO" ]; then
     echo ""
 fi
 
-info "Recommended next steps:"
-echo "    1. Sign into Apple ID → iCloud → let Documents/Desktop sync"
-echo "    2. Sign into the App Store → redownload purchased apps"
-echo "    3. Open browsers and sign in to sync bookmarks/passwords"
-echo "    4. Test SSH: ssh -T git@github.com"
-echo "    5. Open Steam → sign in → redownload games"
-echo "    6. Sort ~/Developer/personal/ into work/ and oss/"
-echo "    7. Open JetBrains Toolbox → install PyCharm"
-echo "    8. Run ./scripts/verify.sh to check everything"
+info "What the restore script handled automatically:"
+echo "    ✓ Homebrew packages and casks (including migrated manual installs)"
+echo "    ✓ Mac App Store apps"
+echo "    ✓ Dotfiles, SSH keys, GPG keys, cloud credentials"
+echo "    ✓ App settings (VS Code, Cursor, Ghostty, iTerm2, Warp, Obsidian)"
+echo "    ✓ License plists (BBEdit, Bartender, iStat Menus, etc.)"
+echo "    ✓ Projects → ~/Developer/"
+echo "    ✓ Screenshots → ~/Pictures/Screenshots/"
+echo "    ✓ Conda environments, npm globals"
 echo ""
+
+info "Sign-in apps — open each and log into your account:"
+echo "    1. Apple ID → System Settings → sign in → iCloud syncs Documents/Desktop"
+echo "    2. App Store → sign in → redownload purchased apps (Final Cut Pro, etc.)"
+echo "    3. 1Password → sign into your 1Password account"
+echo "    4. Microsoft 365 → open any Office app → sign in (activates all Office apps)"
+echo "    5. Browsers → sign into Chrome/Arc/Opera → extensions sync automatically"
+echo "    6. OneDrive → sign in → files sync"
+echo "    7. Steam → sign in → redownload games from your library"
+echo "    8. JetBrains Toolbox → sign in → install PyCharm → Settings → Plugins"
+echo "    9. ChatGPT / Claude / Perplexity → sign in"
+echo ""
+
+info "Verify and organize:"
+echo "   10. Test SSH: ssh -T git@github.com"
+echo "   11. Sort ~/Developer/personal/ into work/ and oss/"
+echo "   12. Launch license-key apps (BBEdit, Bartender, etc.) to confirm activation"
+echo "   13. Run ./scripts/verify.sh to check everything"
+echo ""
+
+if [ -f "$BACKUP/migration-manifest.txt" ]; then
+    info "Full migration manifest: $BACKUP/migration-manifest.txt"
+    info "  Lists every app and exactly what it needs (sign-in, config, license, etc.)"
+    echo ""
+fi
+
 info "Directory layout:"
 echo "    ~/Developer/personal/    — your personal projects"
 echo "    ~/Developer/work/        — work projects"

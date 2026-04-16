@@ -5,6 +5,7 @@ A clean migration toolkit for moving to a new Mac without Migration Assistant. I
 ## Table of Contents
 
 - [Philosophy](#philosophy)
+- [Migration Patterns](#migration-patterns)
 - [Architecture](#architecture)
 - [Repo Structure](#repo-structure)
 - [Backup on the External Drive](#backup-on-the-external-drive)
@@ -23,6 +24,24 @@ A clean migration toolkit for moving to a new Mac without Migration Assistant. I
 Migration Assistant copies everything — every preference, every daemon, every stale cache and orphaned config file accumulated over years. That works, but it defeats the purpose of getting a new machine. This toolkit takes the opposite approach: capture only what you need, then rebuild from scratch. You get a clean system with an organized layout, and you know exactly what's on it.
 
 The design follows four principles: assume chaos on the old Mac (scan everywhere, classify what you find), be declarative where possible (Brewfile over a list of manual installs), normalize on restore (install via Homebrew even if the original was a .dmg), and be verifiable (a dedicated script to confirm everything landed correctly).
+
+---
+
+## Migration Patterns
+
+Not all software migrates the same way. Installing the binary is only the first step — every app also needs its data, configuration, and license activation to be fully functional. This toolkit recognizes five distinct migration patterns and handles each one differently.
+
+**Pattern 1 — Sign In.** Cloud-synced apps that restore everything via account login. You install the binary, sign into your account, and all data, settings, and license state come back automatically. The backup only needs to note that these exist; the restore just installs them and reminds you to sign in. Examples: 1Password, Microsoft 365 (Word, Excel, etc.), OneDrive, ChatGPT, Claude, Perplexity, WhatsApp.
+
+**Pattern 2 — Restore Config.** Apps that are functional after install but lose your workflow without their settings files. The license is either free, open-source, or handled by account login — the real value is in the config files, keybindings, snippets, and themes. The backup copies these files; the restore puts them back in the right locations. Examples: VS Code, Cursor, Ghostty, iTerm2, Warp, PyCharm, Zed, shell configs (.zshrc, .gitconfig).
+
+**Pattern 3 — Restore License.** Apps that store a serial number or license key in a macOS preference plist. If you copy the right plist file to `~/Library/Preferences/` on the new Mac, the app activates without prompting for a key. If you don't have the plist, you need to find and re-enter the original license key. The backup captures these plists explicitly. Examples: BBEdit, Bartender, iStat Menus, TG Pro, Gemini 2, Shottr, TextSniper, CrossOver.
+
+**Pattern 4 — Re-download Content.** Apps that manage large content which must be re-acquired after install. The app binary is easy to install, but the real payload — games, container images, Python environments — needs to be pulled down again (or restored from a backup of the content itself). Examples: Steam (re-download games after login), CrossOver bottles (restore from backup or reinstall Windows games), Docker (pull images), Anaconda (recreate environments from exported YAML).
+
+**Pattern 5 — Sync Extensions.** Browser and editor extensions that live inside a host app. Most sync automatically when you sign into the host app's account (Chrome extensions sync with your Google account, VS Code can sync via GitHub). When sync isn't available, the backup captures extension lists so you can reinstall from a reference. VS Code and Cursor extensions can be scripted via `--install-extension`; browser extensions and JetBrains plugins require manual reinstall from the list.
+
+The backup script generates a `migration-manifest.txt` that classifies every installed app into one of these patterns, so you know exactly what each app needs on the new Mac before you start the restore.
 
 ---
 
@@ -128,6 +147,12 @@ When you run backup.sh, it creates a timestamped directory on the external drive
 │   ├── pycharm/                 ← PyCharm code styles, keymaps, options
 │   ├── obsidian/                ← Obsidian vault config
 │   └── macos-defaults-full.txt  ← complete macOS defaults database
+├── licenses/
+│   └── plists/                  ← preference plists containing license keys/serials
+│       ├── com.barebones.bbedit.plist
+│       ├── com.surteesstudios.Bartender.plist
+│       └── ...                      (BBEdit, Bartender, iStat, TG Pro, Gemini, etc.)
+├── migration-manifest.txt       ← every app classified by migration pattern
 ├── crossover/                   ← CrossOver bottles (optional, can be very large)
 ├── projects/
 │   ├── _project-list.txt        ← manifest of all discovered project paths
@@ -207,6 +232,10 @@ The XDG Base Directory Specification (freedesktop.org) defines `~/.config` as th
 
 **Sensitive material flagged explicitly.** The scripts use a distinct `sensitive` log marker (a lock icon) whenever they handle SSH keys, GPG keys, or cloud credentials. This is a deliberate UX choice: you should always know when secret material is being written to or read from the backup drive.
 
+**Migration manifest and pattern classification.** The backup generates a `migration-manifest.txt` that classifies every installed app into one of five patterns: sign-in (cloud-synced), config restore, license-key restore, content re-download, or extension sync. This means you never have to guess what an app needs on the new Mac — the manifest tells you. The restore script's final summary is organized around these patterns too, so the post-restore checklist is practical rather than a generic list of "stuff to do."
+
+**License plist preservation.** Many macOS apps store their license or serial number in a preference plist under `~/Library/Preferences/`. The backup captures these explicitly, and the restore copies them back before you launch the apps. This avoids the common problem of having to dig through old emails looking for license keys. The toolkit maintains a map of known license plists (`LICENSE_PLISTS` in backup.sh) that you can extend for your own apps.
+
 **Organic-to-clean migration.** The backup script assumes your current Mac is an adhoc setup — apps installed through a mix of methods, code scattered across multiple directories, configs accumulated over years. It scans everywhere and classifies what it finds. The restore script then normalizes everything: Homebrew for all apps, ~/Developer/ for all code, proper permissions on all keys. You go from organic to organized without losing anything.
 
 **Brew-first install strategy.** The backup classifies every app in /Applications by install source and generates a Brewfile.addon for apps that were manually installed but have Homebrew casks available. On the new Mac, these get installed through Homebrew instead of manual downloads. This means `brew upgrade` keeps everything updated going forward — no more hunting for .dmg update dialogs.
@@ -253,7 +282,7 @@ The script assumes an organic, adhoc setup — software installed through a mix 
 
 **Phase 2 — Dotfiles & Config.** Instead of only copying a hardcoded list, it first grabs known priority dotfiles, then scans `~/` for any additional dotfiles it didn't predict. This catches organic configs that accumulate over time. Also backs up SSH, GPG, ~/.config, and cloud credentials (AWS, Kubernetes, Docker).
 
-**Phase 3 — Application Settings.** Copies settings from VS Code, Cursor, Ghostty, iTerm2, Warp, PyCharm (via JetBrains config directories), and Obsidian. Exports the full macOS defaults database. Optionally backs up CrossOver bottles (which can be tens of gigabytes if you have Windows games installed).
+**Phase 3 — Application Settings & Licenses.** Copies settings from VS Code, Cursor, Ghostty, iTerm2, Warp, PyCharm (via JetBrains config directories), and Obsidian. Exports the full macOS defaults database. Backs up license plists from `~/Library/Preferences/` for apps that store serial numbers or activation data in their preferences (BBEdit, Bartender, iStat Menus, TG Pro, Gemini 2, Shottr, TextSniper, CrossOver). Generates a migration manifest that classifies every installed app by migration pattern (sign-in, config, license-key, re-download, extension). Optionally backs up CrossOver bottles (which can be tens of gigabytes if you have Windows games installed).
 
 **Phase 4 — Project Discovery.** Scans the entire home directory up to 5 levels deep for `.git` directories, excluding Library, Trash, node_modules, anaconda3, and virtual environments. Also scans for orphan code files (`.py`, `.ipynb`, `.js`, `.sh`, etc.) that aren't inside any git repo and logs them separately.
 
@@ -312,19 +341,21 @@ The restore strategy is: install everything possible through Homebrew (even apps
 
 **Step 9 — Application Settings.** Restores settings for VS Code, Cursor, Ghostty, iTerm2, Warp, and Obsidian. Installs VS Code and Cursor extensions in parallel.
 
-**Step 10 — Browser Extensions & App Plugins.** Displays the full inventory of browser extensions (Chrome, Arc, Opera, Safari) with human-readable names, and lists JetBrains IDE plugins and Obsidian community plugins. Browser extensions can't be auto-installed — this step provides the reference lists so you can reinstall them after signing into each browser, or use browser sync. JetBrains plugins need to be reinstalled via each IDE's Settings → Plugins.
+**Step 10 — License Keys & Activation.** Restores preference plists that contain serial numbers and activation data to `~/Library/Preferences/`. Apps like BBEdit, Bartender, iStat Menus, and TG Pro should auto-activate when launched. Points the user to the migration manifest for a full breakdown of what each app needs. This is a Pattern 3 migration — the simplest path for licensed software.
 
-**Step 11 — Screenshots.** Restores the date-organized screenshots into `~/Pictures/Screenshots/YYYY/MM/`. Shows a count and year/month breakdown before prompting. Since Step 0 already configured macOS to save new screenshots here, everything ends up in one place going forward.
+**Step 11 — Browser Extensions & App Plugins.** Displays the full inventory of browser extensions (Chrome, Arc, Opera, Safari) with human-readable names, and lists JetBrains IDE plugins and Obsidian community plugins. Browser extensions can't be auto-installed — this step provides the reference lists so you can reinstall them after signing into each browser (Pattern 5 — most will sync via account). JetBrains plugins need to be reinstalled via each IDE's Settings → Plugins.
 
-**Step 12 — Projects.** Flattens all backed-up projects (regardless of where they were scattered on the old Mac) into `~/Developer/personal/`. Shows where they originally came from. Flags orphan code files that weren't in any git repo.
+**Step 12 — Screenshots.** Restores the date-organized screenshots into `~/Pictures/Screenshots/YYYY/MM/`. Shows a count and year/month breakdown before prompting. Since Step 0 already configured macOS to save new screenshots here, everything ends up in one place going forward.
 
-**Step 13 — Personal Files.** Notes that iCloud will re-sync Documents and Desktop automatically. Restores from backup as supplemental insurance. Skips the Screenshots directory (already handled in Step 11).
+**Step 13 — Projects.** Flattens all backed-up projects (regardless of where they were scattered on the old Mac) into `~/Developer/personal/`. Shows where they originally came from. Flags orphan code files that weren't in any git repo.
 
-**Step 14 — Python & Conda.** Recreates conda environments from exported YAML files. Reinstalls npm globals. This is late because it depends on runtimes from Step 2.
+**Step 14 — Personal Files.** Notes that iCloud will re-sync Documents and Desktop automatically. Restores from backup as supplemental insurance. Skips the Screenshots directory (already handled in Step 12).
 
-**Step 15 — System Config.** Restores crontab and Launch Agents.
+**Step 15 — Python & Conda.** Recreates conda environments from exported YAML files. Reinstalls npm globals. This is late because it depends on runtimes from Step 2.
 
-Finishes with a summary including any manual TODO items that accumulated, plus recommended next steps.
+**Step 16 — System Config.** Restores crontab and Launch Agents.
+
+Finishes with a structured summary organized by migration pattern: what was handled automatically, which apps need account sign-in (Pattern 1), which need manual verification (Pattern 3 license apps), and a pointer to the migration manifest for the full picture.
 
 ---
 
@@ -360,7 +391,9 @@ The backup does not capture passwords from Keychain, browser saved passwords, or
 
 **Adding app settings:** Follow the existing pattern in Phase 3 of backup.sh — check if the app's config directory exists, create a subdirectory in the backup, and copy the relevant files.
 
-**Changing the Developer/ layout:** Edit Step 1 in `scripts/restore.sh` to create different subdirectories. Update Step 12 to change where projects are restored to.
+**Changing the Developer/ layout:** Edit Step 1 in `scripts/restore.sh` to create different subdirectories. Update Step 13 to change where projects are restored to.
+
+**Adding license-key apps:** Edit the `LICENSE_PLISTS` associative array in backup.sh to add new bundle IDs. Find an app's bundle ID with: `defaults read /Applications/AppName.app/Contents/Info.plist CFBundleIdentifier`.
 
 **Adding screenshot scan locations:** Edit the `for search_dir in ...` loop in Phase 5 of backup.sh to add directories beyond Desktop, Documents, and Downloads.
 
