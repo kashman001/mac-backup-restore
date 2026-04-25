@@ -37,16 +37,26 @@ The detection helpers are pure functions with no side effects. The config arrays
 
 - [ ] **Step 1: Add the test fixture to `tests/test_helper.bash`**
 
-Append at the end of the file (after `make_fake_license_plist`):
+Append at the end of the file (after `make_fake_license_plist`).
+
+**Important:** the real `com.apple.file-provider-domain-id` xattr is kernel-protected on macOS — `xattr -w` returns `Operation not permitted` for any value of that key, regardless of sandbox. So the fixture **mocks the `xattr` command** rather than writing a real xattr. The mock is path-specific (only the most recent call's `$dir` will match — call once per test). Same pattern as `mock_command_script defaults` used by Tasks 2-4.
 
 ```bash
-# Drop the iCloud File Provider xattr on a directory so detection helpers
-# treat it as iCloud-managed (Desktop & Documents sync).
+# Mark a directory as iCloud-managed for detection-helper tests.
+# The real File Provider xattr (com.apple.file-provider-domain-id) is kernel-
+# protected and cannot be written from user space, so we mock the `xattr`
+# command instead. Call this AFTER setup_test_env so $MOCK_BIN exists.
+# Only the most recent call's $dir will match — call once per test.
 make_fake_icloud_dir() {
     local dir="$1"
     mkdir -p "$dir"
-    xattr -w com.apple.file-provider-domain-id \
-        "com.apple.CloudDocs.iCloudDriveFileProvider/AAAA-BBBB-CCCC" "$dir"
+    mock_command_script xattr <<EOF
+if [ "\$1" = "-p" ] && [ "\$2" = "com.apple.file-provider-domain-id" ] && [ "\$3" = "$dir" ]; then
+    echo "com.apple.CloudDocs.iCloudDriveFileProvider/AAAA-BBBB-CCCC"
+    exit 0
+fi
+exit 1
+EOF
 }
 ```
 
