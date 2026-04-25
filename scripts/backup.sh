@@ -24,8 +24,8 @@ CONFIG_DIR="$REPO_DIR/config"
 [ -f "$CONFIG_DIR/migration-patterns.sh" ] && source "$CONFIG_DIR/migration-patterns.sh"
 
 # Ensure arrays exist even if config files are missing
-declare -A CASK_MAP 2>/dev/null || true
-declare -A LICENSE_PLISTS 2>/dev/null || true
+declare -a CASK_MAP 2>/dev/null || true
+declare -a LICENSE_PLISTS 2>/dev/null || true
 declare -a APP_SETTINGS 2>/dev/null || true
 declare -a SIGN_IN_APPS 2>/dev/null || true
 declare -a RE_DOWNLOAD_APPS 2>/dev/null || true
@@ -133,8 +133,10 @@ APPLE_BUNDLED_PATTERN="Safari.app|Utilities"
 _find_cask_name() {
     local app="$1"
     # 1. Check the user's CASK_MAP first
-    if [ -n "${CASK_MAP[$app]:-}" ]; then
-        echo "${CASK_MAP[$app]}"
+    # Guard ${arr[@]} expansion: bash 3.2 + set -u errors on empty arrays.
+    local mapped
+    if [ "${#CASK_MAP[@]}" -gt 0 ] && mapped=$(lookup "$app" "${CASK_MAP[@]}"); then
+        echo "$mapped"
         return 0
     fi
     # 2. Try simple name derivation (lowercase, strip .app, replace spaces with dashes)
@@ -588,15 +590,19 @@ mkdir -p "$LIC/plists"
 # LICENSE_PLISTS is loaded from config/license-plists.sh above.
 
 LICENSE_COUNT=0
-for app_name in "${!LICENSE_PLISTS[@]}"; do
-    bundle_id="${LICENSE_PLISTS[$app_name]}"
-    plist="$HOME/Library/Preferences/${bundle_id}.plist"
-    if [ -f "$plist" ]; then
-        cp "$plist" "$LIC/plists/" 2>/dev/null
-        log "$app_name license plist (${bundle_id})"
-        ((LICENSE_COUNT++))
-    fi
-done
+# Guard ${arr[@]} expansion: bash 3.2 + set -u errors on empty arrays.
+if [ "${#LICENSE_PLISTS[@]}" -gt 0 ]; then
+    for entry in "${LICENSE_PLISTS[@]}"; do
+        app_name="${entry%%|*}"
+        bundle_id="${entry#*|}"
+        plist="$HOME/Library/Preferences/${bundle_id}.plist"
+        if [ -f "$plist" ]; then
+            cp "$plist" "$LIC/plists/" 2>/dev/null
+            log "$app_name license plist (${bundle_id})"
+            ((LICENSE_COUNT++))
+        fi
+    done
+fi
 
 if [ "$LICENSE_COUNT" -gt 0 ]; then
     info "$LICENSE_COUNT license plists backed up"
@@ -655,8 +661,9 @@ MANIFEST="$BACKUP_DIR/migration-manifest.txt"
     echo "# These apps store license data in ~/Library/Preferences/."
     echo "# Restoring the plist should auto-activate. Keep your keys handy as backup."
     if [ "${#LICENSE_PLISTS[@]}" -gt 0 ]; then
-        for app_name in "${!LICENSE_PLISTS[@]}"; do
-            bundle_id="${LICENSE_PLISTS[$app_name]}"
+        for entry in "${LICENSE_PLISTS[@]}"; do
+            app_name="${entry%%|*}"
+            bundle_id="${entry#*|}"
             if [ -f "$HOME/Library/Preferences/${bundle_id}.plist" ]; then
                 echo "  $app_name → licenses/plists/${bundle_id}.plist"
             fi

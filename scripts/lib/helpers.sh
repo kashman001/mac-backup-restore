@@ -39,3 +39,22 @@ confirm() {
 has() {
     command -v "$1" &>/dev/null
 }
+
+# Look up a value by key in a pipe-delimited array.
+# Usage: lookup KEY "${ARRAY[@]}"
+# Prints value and returns 0 if found, returns 1 if not.
+# Constraint: keys must not contain '|'. Values may contain '|' (only the first
+# '|' is treated as the delimiter).
+# Caller must guard empty-array expansion under bash 3.2 + set -u, e.g.:
+#   [ "${#ARR[@]}" -gt 0 ] && lookup KEY "${ARR[@]}"
+lookup() {
+    local key="$1"; shift
+    local entry
+    for entry in "$@"; do
+        if [ "${entry%%|*}" = "$key" ]; then
+            echo "${entry#*|}"
+            return 0
+        fi
+    done
+    return 1
+}

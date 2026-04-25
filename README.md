@@ -460,11 +460,11 @@ Each check is either a pass (green checkmark), fail (red X), or skip (blue info,
 
 All user-specific data lives in the `config/` directory. You customize these files for your setup — the scripts themselves are generic and rarely need editing.
 
-**Adding app cask mappings** (`config/cask-map.sh`): Add entries when the app name doesn't trivially match the Homebrew cask name. For example, "iTerm.app" needs `["iTerm.app"]="iterm2"` because the cask name doesn't match. Most apps (like "Cursor.app" → "cursor") are auto-discovered via `brew info` and don't need entries.
+**Adding app cask mappings** (`config/cask-map.sh`): Add entries when the app name doesn't trivially match the Homebrew cask name. For example, "iTerm.app" needs `"iTerm.app|iterm2"` because the cask name doesn't match. Most apps (like "Cursor.app" → "cursor") are auto-discovered via `brew info` and don't need entries.
 
 **Adding app settings** (`config/app-settings.sh`): Add a pipe-delimited entry with the app name, path relative to `$HOME`, backup subdirectory name, and optionally specific files to copy. For example: `"Alacritty|.config/alacritty|alacritty|"` to back up the entire directory, or `"VS Code|Library/Application Support/Code/User|vscode|settings.json keybindings.json snippets"` to copy specific files.
 
-**Adding license-key apps** (`config/license-plists.sh`): Add entries mapping the app display name to its preference plist bundle ID. Find an app's bundle ID with: `defaults read /Applications/AppName.app/Contents/Info.plist CFBundleIdentifier`.
+**Adding license-key apps** (`config/license-plists.sh`): Add pipe-delimited entries mapping the app display name to its preference plist bundle ID. For example: `"BBEdit|com.barebones.bbedit"`. Find an app's bundle ID with: `defaults read /Applications/AppName.app/Contents/Info.plist CFBundleIdentifier`.
 
 **Classifying sign-in apps** (`config/migration-patterns.sh`): Add apps that restore everything via account login to the `SIGN_IN_APPS` array. These won't have settings backed up — just a reminder to sign in after install.
 
