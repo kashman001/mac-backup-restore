@@ -271,16 +271,29 @@ EOF
 
 # ── is_icloud_music_enabled() ──────────────────────────────────────────────
 
-@test "is_icloud_music_enabled: true when cloudLibraryEnabled is 1" {
+@test "is_icloud_music_enabled: true when SubscriptionAvailability is 1" {
     setup_test_env
     mock_command_script defaults <<'EOF'
-if [ "$1" = "read" ] && [ "$2" = "com.apple.Music" ] && [ "$3" = "cloudLibraryEnabled" ]; then
+if [ "$1" = "read" ] && [ "$2" = "com.apple.Music" ] && [ "$3" = "_MPCloudServiceStatusControllerSubscriptionAvailability" ]; then
     echo "1"
     exit 0
 fi
 exit 1
 EOF
     is_icloud_music_enabled
+    teardown_test_env
+}
+
+@test "is_icloud_music_enabled: false when SubscriptionAvailability is 0" {
+    setup_test_env
+    mock_command_script defaults <<'EOF'
+if [ "$1" = "read" ] && [ "$2" = "com.apple.Music" ] && [ "$3" = "_MPCloudServiceStatusControllerSubscriptionAvailability" ]; then
+    echo "0"
+    exit 0
+fi
+exit 1
+EOF
+    ! is_icloud_music_enabled
     teardown_test_env
 }
 

@@ -78,8 +78,15 @@ is_icloud_photos_enabled() {
 }
 
 # Returns 0 if Apple Music's iCloud Music Library / Sync Library is on.
+# Detection: _MPCloudServiceStatusControllerSubscriptionAvailability = 1 in
+# com.apple.Music means the account has an active Apple Music (or iTunes Match)
+# subscription with cloud library access. The cloudLibraryEnabled key that was
+# once writable by the app no longer appears in modern macOS; the per-library
+# sync toggle is stored in the binary Library.musicdb, not in UserDefaults.
 is_icloud_music_enabled() {
-    [ "$(defaults read com.apple.Music cloudLibraryEnabled 2>/dev/null)" = "1" ]
+    [ "$(defaults read com.apple.Music \
+        _MPCloudServiceStatusControllerSubscriptionAvailability \
+        2>/dev/null)" = "1" ]
 }
 
 # Returns 0 if TV.app's iCloud / iTunes-in-the-Cloud is on.
