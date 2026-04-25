@@ -240,14 +240,11 @@ setup() {
 
 # ── is_icloud_photos_enabled() ─────────────────────────────────────────────
 
-@test "is_icloud_photos_enabled: true when iCloudPhotoLibraryEnabled is 1" {
+@test "is_icloud_photos_enabled: true when cloudphotod has CPLEngineParameters-SystemLibrary" {
     setup_test_env
-    local prefs="$FAKE_HOME/Library/Containers/com.apple.Photos/Data/Library/Preferences"
-    mkdir -p "$prefs"
-    : > "$prefs/com.apple.Photos.plist"
     mock_command_script defaults <<'EOF'
-if [ "$1" = "read" ] && [[ "$2" == */com.apple.Photos.plist ]] && [ "$3" = "iCloudPhotoLibraryEnabled" ]; then
-    echo "1"
+if [ "$1" = "read" ] && [ "$2" = "com.apple.cloudphotod" ] && [ "$3" = "CPLEngineParameters-SystemLibrary" ]; then
+    echo "{ clientLibraryBasePath = \"/fake/Photos Library.photoslibrary/resources/cpl/cloudsync.noindex\"; }"
     exit 0
 fi
 exit 1
@@ -256,20 +253,17 @@ EOF
     teardown_test_env
 }
 
-@test "is_icloud_photos_enabled: false when prefs file is missing" {
+@test "is_icloud_photos_enabled: false when cloudphotod key is absent" {
     setup_test_env
+    mock_command_failing defaults
     ! is_icloud_photos_enabled
     teardown_test_env
 }
 
-@test "is_icloud_photos_enabled: false when iCloudPhotoLibraryEnabled is 0" {
+@test "is_icloud_photos_enabled: false when defaults read exits non-zero" {
     setup_test_env
-    local prefs="$FAKE_HOME/Library/Containers/com.apple.Photos/Data/Library/Preferences"
-    mkdir -p "$prefs"
-    : > "$prefs/com.apple.Photos.plist"
     mock_command_script defaults <<'EOF'
-echo "0"
-exit 0
+exit 1
 EOF
     ! is_icloud_photos_enabled
     teardown_test_env

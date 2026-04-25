@@ -68,10 +68,13 @@ is_icloud_drive_synced() {
 }
 
 # Returns 0 if iCloud Photos sync is enabled.
+# Detection: com.apple.cloudphotod writes "CPLEngineParameters-SystemLibrary" to its
+# defaults domain only when iCloud Photos is provisioned and actively syncing.
+# The Photos.plist key iCloudPhotoLibraryEnabled was deprecated/relocated in macOS
+# Sequoia/Tahoe and is no longer present in com.apple.Photos on modern systems.
 is_icloud_photos_enabled() {
-    local p="$HOME/Library/Containers/com.apple.Photos/Data/Library/Preferences/com.apple.Photos.plist"
-    [ -f "$p" ] || return 1
-    [ "$(defaults read "$p" iCloudPhotoLibraryEnabled 2>/dev/null)" = "1" ]
+    defaults read com.apple.cloudphotod "CPLEngineParameters-SystemLibrary" \
+        >/dev/null 2>&1
 }
 
 # Returns 0 if Apple Music's iCloud Music Library / Sync Library is on.
