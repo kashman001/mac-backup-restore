@@ -58,3 +58,11 @@ lookup() {
     done
     return 1
 }
+
+# Returns 0 if PATH is part of iCloud Desktop & Documents sync.
+# Detection: the iCloud File Provider stamps an xattr on managed dirs.
+is_icloud_drive_synced() {
+    [ -e "$1" ] || return 1
+    xattr -p com.apple.file-provider-domain-id "$1" 2>/dev/null \
+        | grep -q "CloudDocs.iCloudDriveFileProvider"
+}

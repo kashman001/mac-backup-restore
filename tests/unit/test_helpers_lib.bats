@@ -211,3 +211,25 @@ setup() {
     [ "$status" -eq 0 ]
     [ "$output" = "OK" ]
 }
+
+# ── is_icloud_drive_synced() ───────────────────────────────────────────────
+
+@test "is_icloud_drive_synced: true when CloudDocs xattr is present" {
+    setup_test_env
+    make_fake_icloud_dir "$FAKE_HOME/Documents"
+    is_icloud_drive_synced "$FAKE_HOME/Documents"
+    teardown_test_env
+}
+
+@test "is_icloud_drive_synced: false on a plain directory" {
+    setup_test_env
+    mkdir -p "$FAKE_HOME/plain"
+    ! is_icloud_drive_synced "$FAKE_HOME/plain"
+    teardown_test_env
+}
+
+@test "is_icloud_drive_synced: false when the path does not exist" {
+    setup_test_env
+    ! is_icloud_drive_synced "$FAKE_HOME/nope"
+    teardown_test_env
+}

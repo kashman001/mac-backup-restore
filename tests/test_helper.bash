@@ -141,3 +141,12 @@ make_fake_license_plist() {
     /usr/bin/plutil -create xml1 "$prefs/${bundle_id}.plist" 2>/dev/null || \
         echo '<?xml version="1.0"?><plist version="1.0"><dict/></plist>' > "$prefs/${bundle_id}.plist"
 }
+
+# Drop the iCloud File Provider xattr on a directory so detection helpers
+# treat it as iCloud-managed (Desktop & Documents sync).
+make_fake_icloud_dir() {
+    local dir="$1"
+    mkdir -p "$dir"
+    xattr -w com.apple.file-provider-domain-id \
+        "com.apple.CloudDocs.iCloudDriveFileProvider/AAAA-BBBB-CCCC" "$dir"
+}
