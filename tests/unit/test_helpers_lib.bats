@@ -237,3 +237,40 @@ setup() {
     ! is_icloud_drive_synced "$FAKE_HOME/nope"
     teardown_test_env
 }
+
+# ── is_icloud_photos_enabled() ─────────────────────────────────────────────
+
+@test "is_icloud_photos_enabled: true when iCloudPhotoLibraryEnabled is 1" {
+    setup_test_env
+    local prefs="$FAKE_HOME/Library/Containers/com.apple.Photos/Data/Library/Preferences"
+    mkdir -p "$prefs"
+    : > "$prefs/com.apple.Photos.plist"
+    mock_command_script defaults <<'EOF'
+if [ "$1" = "read" ] && [[ "$2" == */com.apple.Photos.plist ]] && [ "$3" = "iCloudPhotoLibraryEnabled" ]; then
+    echo "1"
+    exit 0
+fi
+exit 1
+EOF
+    is_icloud_photos_enabled
+    teardown_test_env
+}
+
+@test "is_icloud_photos_enabled: false when prefs file is missing" {
+    setup_test_env
+    ! is_icloud_photos_enabled
+    teardown_test_env
+}
+
+@test "is_icloud_photos_enabled: false when iCloudPhotoLibraryEnabled is 0" {
+    setup_test_env
+    local prefs="$FAKE_HOME/Library/Containers/com.apple.Photos/Data/Library/Preferences"
+    mkdir -p "$prefs"
+    : > "$prefs/com.apple.Photos.plist"
+    mock_command_script defaults <<'EOF'
+echo "0"
+exit 0
+EOF
+    ! is_icloud_photos_enabled
+    teardown_test_env
+}

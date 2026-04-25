@@ -66,3 +66,10 @@ is_icloud_drive_synced() {
     xattr -p com.apple.file-provider-domain-id "$1" 2>/dev/null \
         | grep -q "CloudDocs.iCloudDriveFileProvider"
 }
+
+# Returns 0 if iCloud Photos sync is enabled.
+is_icloud_photos_enabled() {
+    local p="$HOME/Library/Containers/com.apple.Photos/Data/Library/Preferences/com.apple.Photos.plist"
+    [ -f "$p" ] || return 1
+    [ "$(defaults read "$p" iCloudPhotoLibraryEnabled 2>/dev/null)" = "1" ]
+}
