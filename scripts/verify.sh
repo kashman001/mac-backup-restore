@@ -31,16 +31,16 @@ SKIP=0
 check() {
     if eval "$2" 2>/dev/null; then
         log "$1"
-        ((PASS++))
+        : $((PASS++))
     else
         err "$1"
-        ((FAIL++))
+        : $((FAIL++))
     fi
 }
 
 skip() {
     info "$1 — skipped"
-    ((SKIP++))
+    : $((SKIP++))
 }
 
 # ── Core Tools ───────────────────────────────────────────────────────────────
@@ -74,10 +74,10 @@ if [ -d "$HOME/.ssh" ]; then
             PERM=$(stat -f '%A' "$key" 2>/dev/null)
             if [ "$PERM" = "600" ]; then
                 log "  $key permissions OK (600)"
-                ((PASS++))
+                : $((PASS++))
             else
                 err "  $key permissions are $PERM (should be 600)"
-                ((FAIL++))
+                : $((FAIL++))
             fi
         done
     else
@@ -92,10 +92,10 @@ if [ -d "$HOME/.ssh" ]; then
     info "Testing GitHub SSH..."
     if ssh -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
         log "GitHub SSH authentication works"
-        ((PASS++))
+        : $((PASS++))
     else
         warn "GitHub SSH — could not authenticate (may need to add key to GitHub)"
-        ((SKIP++))
+        : $((SKIP++))
     fi
 else
     skip "SSH (directory not found)"
@@ -128,7 +128,7 @@ done
 for editor in code cursor; do
     if has "$editor"; then
         check "$editor CLI available" "has $editor"
-        EXT_COUNT=$($editor --list-extensions 2>/dev/null | wc -l | tr -d ' ')
+        EXT_COUNT=$($editor --list-extensions 2>/dev/null | wc -l | tr -d ' ' || echo 0)
         info "  $editor: $EXT_COUNT extensions installed"
     fi
 done
@@ -138,10 +138,10 @@ if has docker; then
     check "Docker CLI available" "has docker"
     if docker info &>/dev/null; then
         log "Docker daemon running"
-        ((PASS++))
+        : $((PASS++))
     else
         warn "Docker CLI present but daemon not running — open Docker Desktop"
-        ((SKIP++))
+        : $((SKIP++))
     fi
 fi
 
@@ -149,10 +149,10 @@ fi
 phase "Homebrew Health"
 
 if has brew; then
-    FORMULA_COUNT=$(brew list --formula 2>/dev/null | wc -l | tr -d ' ')
-    CASK_COUNT=$(brew list --cask 2>/dev/null | wc -l | tr -d ' ')
+    FORMULA_COUNT=$(brew list --formula 2>/dev/null | wc -l | tr -d ' ' || echo 0)
+    CASK_COUNT=$(brew list --cask 2>/dev/null | wc -l | tr -d ' ' || echo 0)
     log "$FORMULA_COUNT formulae, $CASK_COUNT casks installed"
-    ((PASS++))
+    : $((PASS++))
 
     # If backup provided, verify against the Brewfile
     BREWFILE="$BACKUP/software-inventory/Brewfile"
@@ -165,24 +165,24 @@ if has brew; then
                     pkg=$(echo "$line" | sed 's/^brew "//;s/".*$//')
                     if ! brew list --formula "$pkg" &>/dev/null; then
                         warn "  Missing formula: $pkg"
-                        ((MISSING_BREW++))
+                        : $((MISSING_BREW++))
                     fi
                     ;;
                 cask\ *)
                     pkg=$(echo "$line" | sed 's/^cask "//;s/".*$//')
                     if ! brew list --cask "$pkg" &>/dev/null; then
                         warn "  Missing cask: $pkg"
-                        ((MISSING_BREW++))
+                        : $((MISSING_BREW++))
                     fi
                     ;;
             esac
         done < "$BREWFILE"
         if [ "$MISSING_BREW" -eq 0 ]; then
             log "All Brewfile entries installed"
-            ((PASS++))
+            : $((PASS++))
         else
             err "$MISSING_BREW Brewfile entries missing"
-            ((FAIL++))
+            : $((FAIL++))
         fi
     else
         # Generic check — just confirm brew is healthy
@@ -202,13 +202,15 @@ check "~/Developer/experiments exists" "[ -d ~/Developer/experiments ]"
 check "~/Pictures/Screenshots exists" "[ -d ~/Pictures/Screenshots ]"
 
 # Screenshots
-SCREENSHOT_FILES=$(find ~/Pictures/Screenshots -type f -name "*.png" 2>/dev/null | wc -l | tr -d ' ')
+# `|| echo 0` — when ~/Pictures/Screenshots does not exist on a fresh Mac,
+# find exits 1 and pipefail propagates it, killing the script under set -e.
+SCREENSHOT_FILES=$(find ~/Pictures/Screenshots -type f -name "*.png" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
 if [ "$SCREENSHOT_FILES" -gt 0 ]; then
     info "$SCREENSHOT_FILES screenshots in ~/Pictures/Screenshots"
-    YEAR_DIRS=$(find ~/Pictures/Screenshots -mindepth 1 -maxdepth 1 -type d -name "[0-9]*" 2>/dev/null | wc -l | tr -d ' ')
+    YEAR_DIRS=$(find ~/Pictures/Screenshots -mindepth 1 -maxdepth 1 -type d -name "[0-9]*" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
     if [ "$YEAR_DIRS" -gt 0 ]; then
         log "Screenshots organized into $YEAR_DIRS year directories"
-        ((PASS++))
+        : $((PASS++))
     fi
 else
     info "No screenshots in ~/Pictures/Screenshots (may not have been restored)"
@@ -226,19 +228,19 @@ phase "macOS Settings"
 SCREENSHOT_LOC=$(defaults read com.apple.screencapture location 2>/dev/null || echo "")
 if [ "$SCREENSHOT_LOC" = "$HOME/Pictures/Screenshots" ]; then
     log "Screenshots → ~/Pictures/Screenshots"
-    ((PASS++))
+    : $((PASS++))
 else
     warn "Screenshots going to: ${SCREENSHOT_LOC:-default (Desktop)}"
-    ((SKIP++))
+    : $((SKIP++))
 fi
 
 SHOW_EXT=$(defaults read com.apple.finder AppleShowAllExtensions 2>/dev/null || echo "0")
 if [ "$SHOW_EXT" = "1" ]; then
     log "Finder: showing file extensions"
-    ((PASS++))
+    : $((PASS++))
 else
     info "Finder: file extensions hidden"
-    ((SKIP++))
+    : $((SKIP++))
 fi
 
 # ── Cloud Configs ────────────────────────────────────────────────────────────
@@ -266,19 +268,19 @@ if [ -f "$SOURCES" ]; then
         # Skip bundled/system apps
         echo "$source" | grep -q "bundled" && continue
         if [ -d "/Applications/$app" ] || [ -d "$HOME/Applications/$app" ]; then
-            ((APP_FOUND++))
+            : $((APP_FOUND++))
         else
             warn "  Missing: $app"
-            ((APP_MISSING++))
+            : $((APP_MISSING++))
         fi
     done < "$SOURCES"
 
     if [ "$APP_MISSING" -eq 0 ]; then
         log "All $APP_FOUND applications installed"
-        ((PASS++))
+        : $((PASS++))
     else
         err "$APP_MISSING of $((APP_FOUND + APP_MISSING)) applications missing"
-        ((FAIL++))
+        : $((FAIL++))
         info "  Run: cat $SOURCES | grep 'manual' to see apps needing manual install"
     fi
 else
@@ -299,7 +301,7 @@ for browser_dir in \
     dir="${browser_dir%%:*}"
     name="${browser_dir##*:}"
     if [ -d "$dir" ]; then
-        count=$(ls -1d "$dir"/*/ 2>/dev/null | wc -l | tr -d ' ')
+        count=$(ls -1d "$dir"/*/ 2>/dev/null | wc -l | tr -d ' ' || echo 0)
         info "$name: $count extensions installed"
     fi
 done
@@ -320,13 +322,13 @@ if [ -d "/Applications/Steam.app" ] || [ -d "$HOME/Library/Application Support/S
 
     if [ -d "/Applications/Steam.app" ]; then
         check "Steam installed" "[ -d /Applications/Steam.app ]"
-        STEAM_MANIFESTS=$(ls "$HOME/Library/Application Support/Steam/steamapps"/appmanifest_*.acf 2>/dev/null | wc -l | tr -d ' ')
+        STEAM_MANIFESTS=$(ls "$HOME/Library/Application Support/Steam/steamapps"/appmanifest_*.acf 2>/dev/null | wc -l | tr -d ' ' || echo 0)
         info "$STEAM_MANIFESTS games currently installed in Steam"
     fi
 
     if [ -d "/Applications/CrossOver.app" ]; then
         check "CrossOver installed" "[ -d /Applications/CrossOver.app ]"
-        BOTTLE_COUNT=$(ls "$HOME/Library/Application Support/CrossOver/Bottles/" 2>/dev/null | wc -l | tr -d ' ')
+        BOTTLE_COUNT=$(ls "$HOME/Library/Application Support/CrossOver/Bottles/" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
         info "$BOTTLE_COUNT CrossOver bottles present"
     fi
 fi

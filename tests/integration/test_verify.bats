@@ -8,20 +8,16 @@
 # etc.). Each test stands up a fake $HOME, mocks the commands the script
 # calls, runs the script, and asserts on its stdout.
 #
-# IMPORTANT — KNOWN BUG IN verify.sh
-# ----------------------------------
-# verify.sh enables `set -euo pipefail` (line 12) and then increments tally
-# variables with `((PASS++))`, `((FAIL++))`, `((SKIP++))`. Bash's post-
-# increment `((X++))` returns the OLD value of X as the command exit status.
-# When the counter is 0, the increment exits 1 and `set -e` aborts the
-# script. The very first increment in any branch therefore terminates
-# verify.sh immediately, well before reaching the scorecard summary.
-#
-# We do not modify verify.sh (per task instructions). To exercise the script
-# end-to-end we run it via `run_verify`, which copies verify.sh to a temp
-# path with `set -euo pipefail` neutralised so the bug does not mask later
-# logic. One test (`run_verify_strict ...`) runs the *unmodified* script and
-# documents the bug as a regression hook.
+# HISTORICAL NOTE — set -e + ((PASS++)) bug
+# -----------------------------------------
+# verify.sh once aborted at the first counter increment because bash's
+# `((X++))` returns the OLD value of X as the command exit status, and when
+# the counter was 0, the resulting exit 1 fell through `set -e`. The fix:
+# replace `((PASS++))` with `: $((PASS++))` so the line ends with `:` (always
+# exit 0) while still using arithmetic *expansion* to mutate the counter.
+# `run_verify` keeps a sanitised copy that strips `-e` for backwards-compat
+# with tests that expect the older execution model; new tests should call
+# `run_verify_strict` to exercise the *real* script.
 # =============================================================================
 
 load '../test_helper'
@@ -668,18 +664,28 @@ EOF
     [[ "$output" =~ Skipped:[[:space:]]+[0-9]+ ]]
 }
 
-# ── Bug regression: documents the (( var++ )) under set -e crash ──────────
+# ── Bug regression: ((var++)) under set -e ────────────────────────────────
 
-@test "REGRESSION: unmodified verify.sh exits early at first ((PASS++)) under set -e" {
-    # When verify.sh is run unmodified, `set -euo pipefail` combines with
-    # `((PASS++))` (which exits 1 when PASS was 0) to abort the script after
-    # the very first check. This test pins that behaviour so it's caught if
-    # the script is "fixed" by changing the increment idiom — at which point
-    # this test should be deleted along with the bug.
+@test "REGRESSION: unmodified verify.sh runs all phases under set -e (((var++)) replaced with ': \$((var++))')" {
+    # Was: verify.sh aborted after the first counter increment because
+    # `((PASS++))` returns 1 when PASS was 0 and `set -e` killed the script.
+    # Fix: every increment is now `: $((var++))` — `:` always exits 0 while
+    # the arithmetic expansion still mutates the variable. This test runs
+    # the *unmodified* script and asserts it reaches the scorecard.
     mock_command brew
     mock_command git
     run_verify_strict
-    # Script aborts before reaching the Shell phase.
-    [[ "$output" != *"── Shell ──"* ]]
-    [ "$status" -ne 0 ]
+    # The scorecard banner only prints if the script ran past every phase.
+    [[ "$output" == *"Verification Results"* ]]
+    [[ "$output" == *"Passed:"* ]]
+    [ "$status" -eq 0 ]
+}
+
+@test "REGRESSION: no '((var++))' arithmetic-command increments remain in verify.sh (static guard)" {
+    # Static guard: future edits must not reintroduce the `((var++))` form,
+    # which under set -e aborts the script when var was 0. Use `: \$((var++))`.
+    cd "$PROJECT_ROOT"
+    # grep -E because '((' is a regex metachar; -v \$ to skip the safe
+    # arithmetic-expansion form `$((...))`.
+    ! grep -nE '^[[:space:]]*\(\(' scripts/verify.sh
 }

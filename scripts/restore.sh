@@ -301,7 +301,8 @@ phase "Dotfiles & Config"
 DOTFILES_SRC="$BACKUP/config/dotfiles"
 if [ -d "$DOTFILES_SRC" ]; then
     info "Found backed-up dotfiles:"
-    ls -1 "$DOTFILES_SRC" | grep -v '^_' | sed 's/^/    /'
+    # `|| true` — grep -v exits 1 if every entry begins with `_` (manifest only); pipefail would kill the script
+    ls -1 "$DOTFILES_SRC" | grep -v '^_' | sed 's/^/    /' || true
     echo ""
     confirm "Restore dotfiles to home directory?" && {
         for f in "$DOTFILES_SRC"/.*  "$DOTFILES_SRC"/*; do
@@ -526,7 +527,7 @@ if [ -d "$SCREENSHOTS_SRC" ] && [ "$(find "$SCREENSHOTS_SRC" -type f 2>/dev/null
         count=$(find "$ym" -type f 2>/dev/null | wc -l | tr -d ' ')
         rel="${ym#$SCREENSHOTS_SRC/}"
         log "  $rel: $count screenshots"
-    done
+    done || true
     echo ""
     confirm "Restore screenshots to ~/Pictures/Screenshots/?" && {
         rsync -a "$SCREENSHOTS_SRC/" "$HOME/Pictures/Screenshots/" 2>/dev/null
@@ -560,6 +561,7 @@ if [ -d "$PROJ_SRC" ] && [ "$(ls -A "$PROJ_SRC" 2>/dev/null | grep -v '^_')" ]; 
     echo ""
 
     confirm "Restore projects to ~/Developer/?" && {
+        # `|| true` — find on a backup tree can exit non-zero on perm/xattr quirks; pipefail would abort restore
         find "$PROJ_SRC" -maxdepth 4 -name ".git" -type d 2>/dev/null | while read -r gitdir; do
             project=$(dirname "$gitdir")
             name=$(basename "$project")
@@ -571,7 +573,7 @@ if [ -d "$PROJ_SRC" ] && [ "$(ls -A "$PROJ_SRC" 2>/dev/null | grep -v '^_')" ]; 
                 rsync -a "$project/" "$dest/" 2>/dev/null
                 log "  $name → ~/Developer/personal/$name"
             fi
-        done
+        done || true
         echo ""
         log "Projects consolidated into ~/Developer/personal/"
     }
@@ -700,9 +702,10 @@ if [ -d "$FILES_SRC" ]; then
             info "Found $PHOTO_COUNT loose photos on the old Desktop"
             confirm "Move these to ~/Pictures/ instead of Desktop? (keeps Desktop clean)" && {
                 mkdir -p "$HOME/Pictures/Imported"
+                # `|| true` — find can exit non-zero on perm/xattr quirks; pipefail would abort restore mid-step
                 find "$DESKTOP_SRC" -maxdepth 1 -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.heic" -o -iname "*.raw" -o -iname "*.cr2" -o -iname "*.arw" \) 2>/dev/null | while read -r photo; do
                     cp -a "$photo" "$HOME/Pictures/Imported/" 2>/dev/null
-                done
+                done || true
                 log "Photos moved to ~/Pictures/Imported/"
             }
         fi
@@ -831,7 +834,7 @@ if [ -f "$CARGO_FILE" ] && has cargo; then
     confirm "Reinstall Cargo packages?" && {
         grep '^[a-z]' "$CARGO_FILE" | awk '{print $1}' | sed 's/:$//' | while read -r pkg; do
             cargo install "$pkg" 2>/dev/null && log "  $pkg" || warn "  Failed: $pkg"
-        done
+        done || true
     }
 fi
 

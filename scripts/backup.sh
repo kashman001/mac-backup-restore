@@ -302,9 +302,10 @@ SAFARI_PREFS="$HOME/Library/Preferences/com.apple.Safari.plist"
 if [ -f "$SAFARI_PREFS" ]; then
     SAFARI_OUT="$INV/browser-extensions/safari-extensions.txt"
     # Safari extensions are App Extensions — list them from pluginkit
-    pluginkit -mA 2>/dev/null | grep -i safari > "$SAFARI_OUT" 2>/dev/null
+    # `|| true` — under set -euo pipefail a no-match grep would silently kill the script
+    pluginkit -mA 2>/dev/null | grep -i safari > "$SAFARI_OUT" 2>/dev/null || true
     # Also try to get extension names from Safari preferences
-    defaults read com.apple.Safari 2>/dev/null | grep -A2 "Enabled Extensions" >> "$SAFARI_OUT" 2>/dev/null
+    defaults read com.apple.Safari 2>/dev/null | grep -A2 "Enabled Extensions" >> "$SAFARI_OUT" 2>/dev/null || true
     if [ -s "$SAFARI_OUT" ]; then
         log "Safari extensions"
     else
@@ -340,6 +341,8 @@ fi
 OBSIDIAN_PLUGIN_DIR="$INV/app-plugins/obsidian"
 for search_dir in "$HOME/Documents" "$HOME/Desktop" "$HOME" "$HOME/Library/Mobile Documents/iCloud~md~obsidian/Documents"; do
     [ -d "$search_dir" ] || continue
+    # `|| true` — find on $HOME can exit non-zero on permission errors; pipefail
+    # would propagate that and set -e would kill the script before later phases.
     find "$search_dir" -maxdepth 4 -path "*/.obsidian/plugins" -type d \
         -not -path "*/Library/*" \
         -not -path "*/.Trash/*" \
@@ -355,7 +358,7 @@ for search_dir in "$HOME/Documents" "$HOME/Desktop" "$HOME" "$HOME/Library/Mobil
             else
                 rm -f "$VAULT_PLUGINS"
             fi
-    done
+    done || true
 done
 
 # Remove empty app-plugins dir if nothing was found
@@ -445,7 +448,7 @@ if [ -d "$CROSSOVER_BOTTLES" ]; then
     info "CrossOver bottles found:"
     du -sh "$CROSSOVER_BOTTLES"/* 2>/dev/null | while read -r line; do
         log "  $line"
-    done
+    done || true
     ls -1 "$CROSSOVER_BOTTLES" > "$INV/crossover-bottles.txt" 2>/dev/null
     warn "CrossOver bottles can be very large. Back up separately if needed."
     confirm "Back up CrossOver bottles? (may be tens of GB)" && {
@@ -721,6 +724,8 @@ info "Scanning entire home directory for git repos..."
 LIST="$PROJ/_project-list.txt"
 > "$LIST"
 
+# `|| true` — find $HOME exits non-zero on perm errors (xattrs, locked dirs);
+# under pipefail that would propagate and set -e would silently kill the script.
 find "$HOME" -maxdepth 5 -name ".git" -type d \
     -not -path "*/Library/*" \
     -not -path "*/.Trash/*" \
@@ -729,7 +734,7 @@ find "$HOME" -maxdepth 5 -name ".git" -type d \
     -not -path "*/venv/*" \
     -not -path "*/.cargo/*" \
     -not -path "*/anaconda3/*" \
-    2>/dev/null | while read -r g; do dirname "$g"; done | sort -u > "$LIST"
+    2>/dev/null | while read -r g; do dirname "$g"; done | sort -u > "$LIST" || true
 
 COUNT=$(wc -l < "$LIST" | tr -d ' ')
 
@@ -787,7 +792,7 @@ find "$HOME" -maxdepth 4 -type f \( \
         if ! $in_repo; then
             echo "${f#$HOME/}"
         fi
-    done | sort > "$ORPHANS" 2>/dev/null
+    done | sort > "$ORPHANS" 2>/dev/null || true
 
 ORPHAN_COUNT=$(wc -l < "$ORPHANS" 2>/dev/null | tr -d ' ')
 if [ "$ORPHAN_COUNT" -gt 0 ]; then
@@ -890,6 +895,7 @@ mkdir -p "$SCREENSHOTS_DIR"
 
 for search_dir in "$HOME/Desktop" "$HOME/Documents" "$HOME/Downloads"; do
     [ -d "$search_dir" ] || continue
+    # `|| true` — find can exit non-zero on permission errors; pipefail would kill the script
     find "$search_dir" -maxdepth 2 -name "Screenshot *.png" -type f 2>/dev/null | while read -r screenshot; do
         fname=$(basename "$screenshot")
         if [[ "$fname" =~ ^Screenshot\ ([0-9]{4})-([0-9]{2})-([0-9]{2}) ]]; then
@@ -901,7 +907,7 @@ for search_dir in "$HOME/Desktop" "$HOME/Documents" "$HOME/Downloads"; do
             mkdir -p "$SCREENSHOTS_DIR/unsorted"
             cp -a "$screenshot" "$SCREENSHOTS_DIR/unsorted/" 2>/dev/null
         fi
-    done
+    done || true
 done
 
 SCREENSHOT_COUNT=$(find "$SCREENSHOTS_DIR" -type f -name "*.png" 2>/dev/null | wc -l | tr -d ' ')
@@ -911,7 +917,7 @@ if [ "$SCREENSHOT_COUNT" -gt 0 ]; then
         count=$(find "$ym" -type f 2>/dev/null | wc -l | tr -d ' ')
         rel="${ym#$SCREENSHOTS_DIR/}"
         log "  $rel: $count screenshots"
-    done
+    done || true
 else
     info "No screenshots found"
 fi
@@ -936,7 +942,7 @@ find "$HOME/Documents" "$HOME/Desktop" "$HOME/Downloads" -maxdepth 4 -type f \( 
         mkdir -p "$CREDS/$(dirname "$rel")"
         cp -a "$f" "$CREDS/$rel" 2>/dev/null
         echo "$rel"
-    done > "$CREDS/_found.txt" 2>/dev/null
+    done > "$CREDS/_found.txt" 2>/dev/null || true
 
 CRED_COUNT=$(wc -l < "$CREDS/_found.txt" 2>/dev/null | tr -d ' ')
 if [ "$CRED_COUNT" -gt 0 ]; then

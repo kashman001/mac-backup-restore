@@ -860,3 +860,47 @@ EOF
     [[ "$output" == *"🔒"* ]]
     [[ "$output" == *"contains SSH keys"* ]]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Regression
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "REGRESSION: Safari prefs without 'Enabled Extensions' does not abort backup mid-Phase-1 (set -euo pipefail + grep no-match)" {
+    # Phase 1 ran:
+    #   pluginkit -mA 2>/dev/null | grep -i safari > "$SAFARI_OUT" 2>/dev/null
+    #   defaults read com.apple.Safari 2>/dev/null | grep -A2 "Enabled Extensions" >> "$SAFARI_OUT" 2>/dev/null
+    # Both pipelines run only when the Safari prefs file exists. Under pipefail,
+    # if grep finds no match (modern Safari does not store extensions under
+    # "Enabled Extensions"), the pipeline exits 1 and set -e kills the script
+    # silently — leaving a partial Phase-1 backup and never reaching Phase 2+.
+    # The fix appends `|| true` to both pipelines.
+    mkdir -p "$FAKE_HOME/Library/Preferences"
+    : > "$FAKE_HOME/Library/Preferences/com.apple.Safari.plist"
+    run_backup_yes
+    [ "$status" -eq 0 ]
+    # Reaching the final banner proves the script ran past Phase 1.
+    [[ "$output" == *"Backup Complete"* ]]
+    # And Phase 7 (toolkit packaging) actually wrote the toolkit to the drive.
+    [ -d "$FAKE_DRIVE/mac-backup-restore/scripts" ]
+}
+
+@test "REGRESSION: pipe-to-while pipelines past Phase 1 must terminate in '|| true' under set -euo pipefail" {
+    # Static guard: every `find ... | while` and `<cmd> | while ... > file`
+    # site walking $HOME or grep'ing optional output must end with `|| true`.
+    # If a future edit drops the guard, set -euo pipefail will silently kill
+    # the script when find hits a permission error or grep finds no match
+    # (the same failure mode as the Safari and dotfile bugs).
+    #
+    # The audit below is the one I ran by hand after Phase 4 silently aborted
+    # on a real Mac — encoded so a future edit can't reintroduce it.
+    cd "$PROJECT_ROOT"
+    # 1. Project find ($HOME, maxdepth 5)
+    grep -A 10 'find "\$HOME" -maxdepth 5 -name ".git"' scripts/backup.sh \
+        | grep -q 'sort -u > "\$LIST" || true'
+    # 2. Orphan-code find ($HOME, maxdepth 4)
+    grep -A 30 'find "\$HOME" -maxdepth 4 -type f' scripts/backup.sh \
+        | grep -q 'sort > "\$ORPHANS" 2>/dev/null || true'
+    # 3. Scattered-credentials find ($HOME/Documents/Desktop/Downloads)
+    grep -A 15 'find "\$HOME/Documents" "\$HOME/Desktop" "\$HOME/Downloads"' scripts/backup.sh \
+        | grep -q '> "\$CREDS/_found.txt" 2>/dev/null || true'
+}

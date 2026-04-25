@@ -759,3 +759,20 @@ EOF
     [[ "$output" == *"No screenshots found in backup"* ]] || \
     [[ "$output" == *"No license plists found in backup"* ]]
 }
+
+@test "REGRESSION: dotfiles dir with only _manifest.txt does not abort restore (set -euo pipefail + grep no-match)" {
+    # Step 8 listed dotfiles via `ls -1 dir | grep -v '^_' | sed`. Under
+    # pipefail, when every entry begins with '_' (i.e. only the manifest is
+    # present), grep -v exits 1, the pipeline exits 1, set -e kills the script
+    # silently before Step 9. The fix appends `|| true` to that pipeline.
+    # See setup_fake_backup() comment about the longstanding placeholder.txt
+    # workaround — this test drops the workaround and asserts the real fix.
+    FAKE_BACKUP="$FAKE_ROOT/manifest-only-backup"
+    mkdir -p "$FAKE_BACKUP/software-inventory" "$FAKE_BACKUP/config/dotfiles"
+    echo 'tap "homebrew/cask"' > "$FAKE_BACKUP/software-inventory/Brewfile"
+    : > "$FAKE_BACKUP/config/dotfiles/_manifest.txt"
+    run_restore_yes "$FAKE_BACKUP"
+    [ "$status" -eq 0 ]
+    # Reaching the final banner proves the script ran past Step 8.
+    [[ "$output" == *"Setup Complete"* ]]
+}
