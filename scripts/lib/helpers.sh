@@ -73,3 +73,8 @@ is_icloud_photos_enabled() {
     [ -f "$p" ] || return 1
     [ "$(defaults read "$p" iCloudPhotoLibraryEnabled 2>/dev/null)" = "1" ]
 }
+
+# Returns 0 if Apple Music's iCloud Music Library / Sync Library is on.
+is_icloud_music_enabled() {
+    [ "$(defaults read com.apple.Music cloudLibraryEnabled 2>/dev/null)" = "1" ]
+}
