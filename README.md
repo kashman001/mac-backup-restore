@@ -14,6 +14,7 @@ A clean migration toolkit for moving to a new Mac without Migration Assistant. I
 - [How to Use: Backup](#how-to-use-backup)
 - [How to Use: Restore](#how-to-use-restore)
 - [How to Use: Verify](#how-to-use-verify)
+- [Testing](#testing)
 - [Security](#security)
 - [Customization](#customization)
 
@@ -81,17 +82,29 @@ mac-backup-restore/
 │   ├── license-plists.sh       ← app name → preference plist bundle IDs
 │   ├── app-settings.sh         ← app → config path → backup subdirectory
 │   └── migration-patterns.sh   ← sign-in apps, re-download apps
-└── scripts/
-    ├── backup.sh               ← run on the old Mac
-    ├── restore.sh              ← run on the new Mac
-    ├── verify.sh               ← run after restore to confirm success
-    └── lib/
-        └── helpers.sh          ← shared functions (logging, prompts, colors)
+├── scripts/
+│   ├── backup.sh               ← run on the old Mac
+│   ├── restore.sh              ← run on the new Mac
+│   ├── verify.sh               ← run after restore to confirm success
+│   └── lib/
+│       └── helpers.sh          ← shared functions (logging, prompts, colors)
+└── tests/
+    ├── README.md               ← test layout and conventions
+    ├── test_helper.bash        ← shared fixtures and command-mocking utilities
+    ├── unit/
+    │   ├── test_helpers_lib.bats
+    │   └── test_configs.bats
+    └── integration/
+        ├── test_backup.bats
+        ├── test_restore.bats
+        └── test_verify.bats
 ```
 
 The scripts live in a `scripts/` directory rather than the repo root to keep the top level clean and to clearly separate documentation from executable code. The shared library lives in `scripts/lib/` following the Unix convention of keeping library code in a `lib/` subdirectory adjacent to the scripts that use it.
 
 The `config/` directory contains all user-customizable data. The scripts are generic — they source these config files and auto-discover as much as possible, falling back to the config for cases that can't be auto-detected (like the mapping between an app named "iTerm.app" and the Homebrew cask "iterm2"). You customize the config files for your setup; you rarely need to edit the scripts themselves.
+
+The `tests/` directory contains a [bats-core](https://github.com/bats-core/bats-core) test suite that exercises every script and config file. See the [Testing](#testing) section for details.
 
 ---
 
@@ -433,6 +446,70 @@ Without a backup path, the script runs generic checks across ten categories: cor
 With a backup path, the script additionally verifies every Brewfile entry is installed and checks the full application inventory from `install-sources.txt`, reporting exactly which apps are missing.
 
 Each check is either a pass (green checkmark), fail (red X), or skip (blue info, for tools that weren't in the backup). At the end it prints a scorecard. Any failures indicate something that needs manual attention — the most common being GitHub SSH authentication, which requires adding your SSH public key to GitHub after restoring it to the new machine.
+
+---
+
+## Testing
+
+The toolkit ships with a [bats-core](https://github.com/bats-core/bats-core) test suite (195 tests across five files) that exercises every script and config file. Tests run under stock macOS `/bin/bash` (3.2.57) — the same shell the toolkit promises to support — so the harness validates that promise on every run.
+
+### Running
+
+```bash
+brew install bats-core
+
+# All tests (195)
+bats tests/
+
+# Just unit tests (fast, no fake env)
+bats tests/unit/
+
+# Just integration tests (slower; set up fake $HOME and drive)
+bats tests/integration/
+
+# A single file
+bats tests/integration/test_verify.bats
+
+# A single test by description
+bats tests/integration/test_restore.bats --filter "ssh keys restored"
+```
+
+### What's covered
+
+| File | Tests | Scope |
+|---|---|---|
+| `tests/unit/test_helpers_lib.bats` | 25 | `scripts/lib/helpers.sh` — `lookup`, `has`, `confirm`, log helpers, bash 3.2 compatibility |
+| `tests/unit/test_configs.bats` | 15 | All `config/*.sh` files source cleanly under bash 3.2; regression guards against `declare -A` |
+| `tests/integration/test_backup.bats` | 52 | `scripts/backup.sh` end-to-end: every phase from software inventory through toolkit packaging |
+| `tests/integration/test_restore.bats` | 56 | `scripts/restore.sh` end-to-end: dotfile restoration, SSH permissions, license plists, project layout, package managers |
+| `tests/integration/test_verify.bats` | 47 | `scripts/verify.sh`: all check categories (core tools, shell, SSH, GPG, dev tools, cloud, JetBrains, scorecard) |
+
+### How tests stay isolated
+
+Every integration test creates a per-test temp directory under `$TMPDIR` containing a fake `$HOME` and a fake external drive. The real `$HOME` and `/Volumes/` are never touched. External commands the scripts call — `brew`, `mas`, `defaults`, `osascript`, `npm`, `pip3`, `gpg`, `ssh`, etc. — are mocked via PATH-prepended stub scripts that record their arguments to `.calls` files. Tests assert behavior by checking which mocks were invoked with what arguments, and which files landed in the fake `$HOME` and drive.
+
+The shared harness lives in `tests/test_helper.bash` and provides:
+
+- `setup_test_env` / `teardown_test_env` — combined fake-env and mock-PATH setup
+- `mock_command NAME [LINES...]` — stub that exits 0 and prints the given lines
+- `mock_command_failing NAME [EXIT]` — stub that exits non-zero
+- `mock_command_script NAME <<EOF ... EOF` — custom stub body for context-sensitive responses (e.g. different output for `brew bundle` vs `brew list`)
+- `mock_was_called NAME` / `mock_calls NAME` — argument-recording assertions
+- `make_fake_app NAME` / `make_fake_license_plist BUNDLE_ID` — fixture builders for app inventory and license-restore tests
+
+### Adding tests
+
+Each new `.bats` file should:
+
+1. `load '../test_helper'` (or `'test_helper'` for files directly in `tests/`)
+2. Define `setup() { setup_test_env; }` and `teardown() { teardown_test_env; }`
+3. Use `@test "description" { ... }` blocks
+4. Stay bash-3.2 compatible — no `declare -A`, no bash-4-only parameter expansions, no `<()` process substitution inside arithmetic
+
+Two patterns worth reusing from the existing tests:
+
+- The `yes_input` / `no_input` helpers in the integration tests feed raw `y` or `n` bytes (not lines) into `confirm`'s `read -n 1`, so every prompt sees the same answer regardless of how many fire.
+- Several tests are explicit regression guards — for example, `test_verify.bats` test 47 (*unmodified verify.sh exits early at first `((PASS++))` under set -e*) and test 20 (*real ssh exit 1 + 'successfully authenticated' wrongly reported as failure*). When fixing a script bug, add a regression test that would have caught it.
 
 ---
 
