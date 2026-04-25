@@ -904,3 +904,24 @@ EOF
     grep -A 15 'find "\$HOME/Documents" "\$HOME/Desktop" "\$HOME/Downloads"' scripts/backup.sh \
         | grep -q '> "\$CREDS/_found.txt" 2>/dev/null || true'
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 5 — Cloud-sync detection summary
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "phase 5: cloud-sync summary lists iCloud-managed Documents" {
+    prep_required_home_dirs
+    make_fake_icloud_dir "$FAKE_HOME/Documents"
+    run_backup_yes
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Cloud-sync summary"* ]]
+    [[ "$output" == *"Documents"* ]]
+    [[ "$output" == *"iCloud Desktop"* ]]
+}
+
+@test "phase 5: cloud-sync summary skipped when nothing is cloud-synced" {
+    prep_required_home_dirs
+    run_backup_yes
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"Cloud-sync summary"* ]]
+}

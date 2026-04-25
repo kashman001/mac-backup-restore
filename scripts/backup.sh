@@ -1067,6 +1067,48 @@ if $ICLOUD_ENABLED; then
     echo ""
 fi
 
+# ── 5d-bis. Cloud-sync detection (per docs/superpowers/specs/2026-04-25...) ──
+# Build a list of detected cloud-synced paths. CLOUD_DETECTED entries:
+#   "TOP|<dir>|<label>"           — entire top-level dir is iCloud-managed
+#   "SUB|<parent>|<subpath>|<label>" — known subfolder is cloud-managed
+CLOUD_DETECTED=()
+
+if [ "${#CLOUD_TOP_DIRS[@]}" -gt 0 ]; then
+    for top in "${CLOUD_TOP_DIRS[@]}"; do
+        if is_icloud_drive_synced "$HOME/$top"; then
+            CLOUD_DETECTED+=("TOP|$top|iCloud Desktop & Documents")
+        fi
+    done
+fi
+
+if [ "${#CLOUD_SUBDIRS[@]}" -gt 0 ]; then
+    for entry in "${CLOUD_SUBDIRS[@]}"; do
+        parent="${entry%%|*}"; rest="${entry#*|}"
+        subpath="${rest%%|*}";  rest="${rest#*|}"
+        fn="${rest%%|*}"
+        label="${rest##*|}"
+        if [ -d "$HOME/$parent/$subpath" ] && $fn; then
+            CLOUD_DETECTED+=("SUB|$parent|$subpath|$label")
+        fi
+    done
+fi
+
+if [ "${#CLOUD_DETECTED[@]}" -gt 0 ]; then
+    info "Cloud-sync summary:"
+    for entry in "${CLOUD_DETECTED[@]}"; do
+        kind="${entry%%|*}"; rest="${entry#*|}"
+        if [ "$kind" = "TOP" ]; then
+            d="${rest%%|*}"; lbl="${rest##*|}"
+            printf "    ☁ %-12s %s\n" "$d" "$lbl"
+        else
+            p="${rest%%|*}"; rest2="${rest#*|}"
+            sp="${rest2%%|*}"; lbl="${rest2##*|}"
+            printf "    ☁ %-12s %s (%s)\n" "$p" "$sp" "$lbl"
+        fi
+    done
+    echo ""
+fi
+
 for dir in "$HOME/Documents" "$HOME/Desktop" "$HOME/Downloads" "$HOME/Pictures" "$HOME/Music" "$HOME/Movies"; do
     name=$(basename "$dir")
     [ -d "$dir" ] && [ "$(ls -A "$dir" 2>/dev/null)" ] || continue
