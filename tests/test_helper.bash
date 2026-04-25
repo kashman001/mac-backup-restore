@@ -142,11 +142,21 @@ make_fake_license_plist() {
         echo '<?xml version="1.0"?><plist version="1.0"><dict/></plist>' > "$prefs/${bundle_id}.plist"
 }
 
-# Drop the iCloud File Provider xattr on a directory so detection helpers
-# treat it as iCloud-managed (Desktop & Documents sync).
+# Mark a directory as iCloud-managed for detection-helper tests.
+# The real File Provider xattr (com.apple.file-provider-domain-id) is kernel-
+# protected and cannot be written from user space, so we mock the `xattr`
+# command instead. Call this AFTER setup_test_env so $MOCK_BIN exists.
 make_fake_icloud_dir() {
     local dir="$1"
     mkdir -p "$dir"
-    xattr -w com.apple.file-provider-domain-id \
-        "com.apple.CloudDocs.iCloudDriveFileProvider/AAAA-BBBB-CCCC" "$dir"
+    # Mock xattr -p to report the dir as iCloud-managed. Other dirs return
+    # nothing (the real xattr behavior for unmanaged paths).
+    mock_command_script xattr <<EOF
+# \$1 is "-p", \$2 is the key, \$3 is the path.
+if [ "\$1" = "-p" ] && [ "\$2" = "com.apple.file-provider-domain-id" ] && [ "\$3" = "$dir" ]; then
+    echo "com.apple.CloudDocs.iCloudDriveFileProvider/AAAA-BBBB-CCCC"
+    exit 0
+fi
+exit 1
+EOF
 }
