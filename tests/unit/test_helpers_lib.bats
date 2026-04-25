@@ -296,3 +296,25 @@ EOF
     ! is_icloud_music_enabled
     teardown_test_env
 }
+
+# ── is_icloud_tv_enabled() ─────────────────────────────────────────────────
+
+@test "is_icloud_tv_enabled: true when cloudLibraryEnabled is 1" {
+    setup_test_env
+    mock_command_script defaults <<'EOF'
+if [ "$1" = "read" ] && [ "$2" = "com.apple.TV" ] && [ "$3" = "cloudLibraryEnabled" ]; then
+    echo "1"
+    exit 0
+fi
+exit 1
+EOF
+    is_icloud_tv_enabled
+    teardown_test_env
+}
+
+@test "is_icloud_tv_enabled: false when defaults read fails" {
+    setup_test_env
+    mock_command_failing defaults
+    ! is_icloud_tv_enabled
+    teardown_test_env
+}

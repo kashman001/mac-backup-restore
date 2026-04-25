@@ -78,3 +78,8 @@ is_icloud_photos_enabled() {
 is_icloud_music_enabled() {
     [ "$(defaults read com.apple.Music cloudLibraryEnabled 2>/dev/null)" = "1" ]
 }
+
+# Returns 0 if TV.app's iCloud / iTunes-in-the-Cloud is on.
+is_icloud_tv_enabled() {
+    [ "$(defaults read com.apple.TV cloudLibraryEnabled 2>/dev/null)" = "1" ]
+}
