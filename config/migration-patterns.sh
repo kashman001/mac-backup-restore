@@ -57,3 +57,24 @@ RE_DOWNLOAD_APPS=(
     "Docker|pull images after install (docker pull)"
 )
 # Note: Anaconda/conda is auto-detected from conda-envs/ in the backup.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cloud-sync detection (Phase 5 of backup.sh)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Top-level $HOME directories that may be fully iCloud-managed via Desktop &
+# Documents sync. Detection at runtime via is_icloud_drive_synced() on the dir.
+CLOUD_TOP_DIRS=(
+    "Documents"
+    "Desktop"
+)
+
+# Cloud-managed subfolders within media directories. The backup script
+# excludes these via rsync --exclude when their app's iCloud sync is on.
+# Format: "PARENT|SUBPATH|DETECTION-FN|HUMAN-LABEL"
+# DETECTION-FN must be a function defined in scripts/lib/helpers.sh.
+CLOUD_SUBDIRS=(
+    "Pictures|Photos Library.photoslibrary|is_icloud_photos_enabled|iCloud Photos"
+    "Music|Music/Media.localized|is_icloud_music_enabled|iCloud Music Library"
+    "Movies|TV/Media.localized|is_icloud_tv_enabled|iCloud TV"
+)

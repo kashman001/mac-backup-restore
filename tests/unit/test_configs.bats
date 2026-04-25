@@ -159,3 +159,18 @@ load '../test_helper'
     [ "$status" -eq 0 ]
     [ "$output" = "0 0 0 0" ]
 }
+
+@test "migration-patterns.sh: defines CLOUD_TOP_DIRS and CLOUD_SUBDIRS" {
+    setup_test_env
+    source "$CONFIG_DIR/migration-patterns.sh"
+    [ "${#CLOUD_TOP_DIRS[@]}" -gt 0 ]
+    [ "${#CLOUD_SUBDIRS[@]}" -gt 0 ]
+    # CLOUD_SUBDIRS entries must have exactly 4 pipe-delimited fields.
+    local entry
+    for entry in "${CLOUD_SUBDIRS[@]}"; do
+        local field_count
+        field_count=$(echo "$entry" | awk -F'|' '{print NF}')
+        [ "$field_count" -eq 4 ]
+    done
+    teardown_test_env
+}
