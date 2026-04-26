@@ -674,6 +674,24 @@ EOF
     [ "$(stat -f '%Lp' "$HOME/.config/gh/hosts.yml")" = "600" ]
 }
 
+@test "step 14: gh-only auth-tokens (no sourcery) does NOT abort restore" {
+    # The auth-tokens block's two inner [ -f ... ] && {} guards used to leave
+    # the outer && {} block returning the failing test's exit status when only
+    # one of the two files was present. set -e exempted &&-chains so the script
+    # didn't actually die, but the if/fi rewrite removes the trap entirely —
+    # this test pins down that the gh-only path runs to completion.
+    setup_fake_backup
+    mkdir -p "$FAKE_BACKUP/files/auth-tokens/gh"
+    echo 'github.com: { user: foo }' > "$FAKE_BACKUP/files/auth-tokens/gh/hosts.yml"
+    # Deliberately do NOT create sourcery/auth.yaml.
+    run_restore_yes "$FAKE_BACKUP"
+    [ "$status" -eq 0 ]
+    [ -f "$HOME/.config/gh/hosts.yml" ]
+    [ ! -f "$HOME/.config/sourcery/auth.yaml" ]
+    [[ "$output" == *"GitHub CLI auth restored"* ]]
+    [[ "$output" != *"Sourcery auth restored"* ]]
+}
+
 @test "step 14: sourcery auth.yaml restored with mode 600" {
     setup_fake_backup
     mkdir -p "$FAKE_BACKUP/files/auth-tokens/sourcery"

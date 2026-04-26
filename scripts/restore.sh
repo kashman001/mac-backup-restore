@@ -178,10 +178,12 @@ fi
 BREWFILE="$BACKUP/software-inventory/Brewfile"
 if [ -f "$BREWFILE" ]; then
     info "Original Brewfile: $(grep -c '' "$BREWFILE") entries"
-    echo "    Formulae: $(grep -c '^brew ' "$BREWFILE" 2>/dev/null || echo 0)"
-    echo "    Casks:    $(grep -c '^cask ' "$BREWFILE" 2>/dev/null || echo 0)"
-    echo "    Taps:     $(grep -c '^tap '  "$BREWFILE" 2>/dev/null || echo 0)"
-    echo "    MAS apps: $(grep -c '^mas '  "$BREWFILE" 2>/dev/null || echo 0)"
+    # `|| true` (not `|| echo 0`): grep -c already prints "0" on no-match before
+    # exiting 1, so `|| echo 0` would print a spurious second "0" line.
+    echo "    Formulae: $(grep -c '^brew ' "$BREWFILE" 2>/dev/null || true)"
+    echo "    Casks:    $(grep -c '^cask ' "$BREWFILE" 2>/dev/null || true)"
+    echo "    Taps:     $(grep -c '^tap '  "$BREWFILE" 2>/dev/null || true)"
+    echo "    MAS apps: $(grep -c '^mas '  "$BREWFILE" 2>/dev/null || true)"
     echo ""
     preflight_for_brewfile "$BREWFILE"
     confirm "Install from original Brewfile?" && {
@@ -654,7 +656,7 @@ if [ -f "$DATA_CLASS" ]; then
     echo ""
 
     # Show stale data (multi-machine sync artifacts)
-    STALE_COUNT=$(grep -c "^STALE" "$DATA_CLASS" 2>/dev/null || echo 0)
+    STALE_COUNT=$(grep -c "^STALE" "$DATA_CLASS" 2>/dev/null || true)
     if [ "$STALE_COUNT" -gt 0 ]; then
         warn "Stale data (old device sync artifacts):"
         grep "^STALE" "$DATA_CLASS" | while IFS='|' read -r tag name size; do
@@ -667,7 +669,7 @@ if [ -f "$DATA_CLASS" ]; then
     fi
 
     # Show archival data
-    ARCHIVAL_COUNT=$(grep -c "^ARCHIVAL" "$DATA_CLASS" 2>/dev/null || echo 0)
+    ARCHIVAL_COUNT=$(grep -c "^ARCHIVAL" "$DATA_CLASS" 2>/dev/null || true)
     if [ "$ARCHIVAL_COUNT" -gt 0 ]; then
         warn "Archival data (large, rarely accessed):"
         grep "^ARCHIVAL" "$DATA_CLASS" | while IFS='|' read -r tag name size note; do
@@ -681,7 +683,7 @@ if [ -f "$DATA_CLASS" ]; then
     fi
 
     # Show app-generated data
-    APP_DATA_COUNT=$(grep -c "^APP-DATA" "$DATA_CLASS" 2>/dev/null || echo 0)
+    APP_DATA_COUNT=$(grep -c "^APP-DATA" "$DATA_CLASS" 2>/dev/null || true)
     if [ "$APP_DATA_COUNT" -gt 0 ]; then
         info "App-generated data:"
         grep "^APP-DATA" "$DATA_CLASS" | while IFS='|' read -r tag name size note; do
@@ -694,7 +696,7 @@ if [ -f "$DATA_CLASS" ]; then
     fi
 
     # Show cloud-synced data — already restoring via account sign-in
-    CLOUD_COUNT=$(grep -c "^CLOUD-SYNCED" "$DATA_CLASS" 2>/dev/null || echo 0)
+    CLOUD_COUNT=$(grep -c "^CLOUD-SYNCED" "$DATA_CLASS" 2>/dev/null || true)
     if [ "$CLOUD_COUNT" -gt 0 ]; then
         info "☁ Cloud-synced sources present in backup but skipped by default:"
         grep "^CLOUD-SYNCED" "$DATA_CLASS" | while IFS='|' read -r tag name size note; do
@@ -743,19 +745,19 @@ if [ -d "$FILES_SRC" ]; then
         find "$AUTH_SRC" -type f -not -name '.*' 2>/dev/null | sed "s|$AUTH_SRC/||" | sed 's/^/    /'
         confirm "Restore auth tokens (GitHub CLI, Sourcery, etc.)?" && {
             # GitHub CLI
-            [ -f "$AUTH_SRC/gh/hosts.yml" ] && {
+            if [ -f "$AUTH_SRC/gh/hosts.yml" ]; then
                 mkdir -p "$HOME/.config/gh"
                 cp "$AUTH_SRC/gh/hosts.yml" "$HOME/.config/gh/" 2>/dev/null
                 chmod 600 "$HOME/.config/gh/hosts.yml" 2>/dev/null
                 log "GitHub CLI auth restored"
-            }
+            fi
             # Sourcery
-            [ -f "$AUTH_SRC/sourcery/auth.yaml" ] && {
+            if [ -f "$AUTH_SRC/sourcery/auth.yaml" ]; then
                 mkdir -p "$HOME/.config/sourcery"
                 cp "$AUTH_SRC/sourcery/auth.yaml" "$HOME/.config/sourcery/" 2>/dev/null
                 chmod 600 "$HOME/.config/sourcery/auth.yaml" 2>/dev/null
                 log "Sourcery auth restored"
-            }
+            fi
         }
     fi
 
@@ -904,7 +906,7 @@ fi
 # Cargo packages (Rust)
 CARGO_FILE="$BACKUP/software-inventory/cargo-packages.txt"
 if [ -f "$CARGO_FILE" ] && has cargo; then
-    CARGO_COUNT=$(grep -c '^[a-z]' "$CARGO_FILE" 2>/dev/null || echo 0)
+    CARGO_COUNT=$(grep -c '^[a-z]' "$CARGO_FILE" 2>/dev/null || true)
     info "Cargo packages from backup ($CARGO_COUNT packages)"
     confirm "Reinstall Cargo packages?" && {
         grep '^[a-z]' "$CARGO_FILE" | awk '{print $1}' | sed 's/:$//' | while read -r pkg; do
