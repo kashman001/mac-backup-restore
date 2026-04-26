@@ -165,9 +165,14 @@ if ! has brew; then
     # Add to PATH for Apple Silicon
     if [ -f /opt/homebrew/bin/brew ]; then
         eval "$(/opt/homebrew/bin/brew shellenv)"
-        # Persist in shell config
-        echo '' >> "$HOME/.zprofile"
-        echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> "$HOME/.zprofile"
+        # Persist in shell config — guard with grep so re-runs (or a previously
+        # restored .zprofile that already contains the line) don't accumulate
+        # duplicates.
+        SHELLENV_LINE='eval "$(/opt/homebrew/bin/brew shellenv)"'
+        if ! grep -qxF "$SHELLENV_LINE" "$HOME/.zprofile" 2>/dev/null; then
+            printf '\n%s\n' "$SHELLENV_LINE" >> "$HOME/.zprofile"
+        fi
+        unset SHELLENV_LINE
     fi
     log "Homebrew installed"
 else
@@ -191,10 +196,17 @@ brew install git gh claude-code 2>&1 | tail -5 || \
 SSH_BOOTSTRAP_SRC="$BACKUP/config/ssh"
 if [ -d "$SSH_BOOTSTRAP_SRC" ]; then
     mkdir -p "$HOME/.ssh"
-    cp -a "$SSH_BOOTSTRAP_SRC/"* "$HOME/.ssh/" 2>/dev/null
+    # Don't muffle stderr: if cp/chmod fails (xattrs from external drive,
+    # mode collisions, etc.), let the message through so set -e doesn't kill
+    # the script with no clue. `|| warn` keeps non-fatal hiccups non-fatal.
+    cp -a "$SSH_BOOTSTRAP_SRC/"* "$HOME/.ssh/" || warn "Some SSH files couldn't be copied (bootstrap)"
     chmod 700 "$HOME/.ssh"
-    chmod 600 "$HOME/.ssh/"* 2>/dev/null
-    chmod 644 "$HOME/.ssh/"*.pub 2>/dev/null
+    chmod 600 "$HOME/.ssh/"*       || warn "chmod 600 ~/.ssh/* had failures (bootstrap)"
+    # nullglob isn't set, so guard the *.pub glob — empty match would pass the
+    # literal `~/.ssh/*.pub` to chmod and trip set -e on a fresh backup.
+    pub_files=( "$HOME"/.ssh/*.pub )
+    [ -e "${pub_files[0]}" ] && chmod 644 "${pub_files[@]}"
+    unset pub_files
     [ -e "$HOME/.ssh/known_hosts" ] && chmod 644 "$HOME/.ssh/known_hosts"
     [ -e "$HOME/.ssh/config" ]      && chmod 644 "$HOME/.ssh/config"
     log "SSH keys restored (bootstrap; full restore in Step 8)"
@@ -408,11 +420,17 @@ if [ -d "$DOTFILES_SRC" ]; then
         for f in "$DOTFILES_SRC"/.*  "$DOTFILES_SRC"/*; do
             [ -e "$f" ] || continue
             name=$(basename "$f")
-            [ "$name" = "." ] || [ "$name" = ".." ] || [ "$name" = "_manifest.txt" ] && continue
+            # Group the skip-name tests so `&& continue` binds to the whole OR
+            # chain, not just the last clause. Previously the precedence was
+            # subtle enough to be a foot-gun on edits.
+            case "$name" in . | .. | _manifest.txt) continue ;; esac
             if [ -e "$HOME/$name" ]; then
-                cp -a "$HOME/$name" "$HOME/${name}.pre-restore" 2>/dev/null
+                cp -a "$HOME/$name" "$HOME/${name}.pre-restore" \
+                    || warn "Couldn't snapshot existing ~/$name to .pre-restore"
             fi
-            cp -a "$f" "$HOME/$name" 2>/dev/null
+            if ! cp -a "$f" "$HOME/$name"; then
+                warn "Failed to restore dotfile: $name"
+            fi
         done
         log "Dotfiles restored"
     }
@@ -423,10 +441,19 @@ SSH_SRC="$BACKUP/config/ssh"
 if [ -d "$SSH_SRC" ] && [ "$(ls -A "$SSH_SRC")" ]; then
     confirm "Restore SSH keys?" && {
         mkdir -p "$HOME/.ssh"
-        cp -a "$SSH_SRC/"* "$HOME/.ssh/" 2>/dev/null
+        # No silent stderr suppression — if cp/chmod fails (e.g. xattrs from a
+        # non-APFS source, or a stale mode-600 dir), we want to see it rather
+        # than have set -e abort the whole script with no diagnostic.
+        cp -a "$SSH_SRC/"* "$HOME/.ssh/" || warn "Some SSH files couldn't be copied"
         chmod 700 "$HOME/.ssh"
-        chmod 600 "$HOME/.ssh/"* 2>/dev/null
-        chmod 644 "$HOME/.ssh/"*.pub 2>/dev/null
+        # chmod against the glob can hit a directory entry (like agent/) — that's
+        # fine, chmod returns 0. The `|| warn` is purely belt-and-suspenders.
+        chmod 600 "$HOME/.ssh/"*       || warn "chmod 600 ~/.ssh/* had failures"
+        # *.pub may not exist on a backup with no public keys; nullglob isn't
+        # set, so guard the glob expansion before chmod.
+        if compgen -G "$HOME/.ssh/*.pub" >/dev/null; then
+            chmod 644 "$HOME"/.ssh/*.pub
+        fi
         # `[ -e ] && chmod` (set -e exempts the LHS-failing &&) so a backup
         # that doesn't include known_hosts/config doesn't kill the script.
         [ -e "$HOME/.ssh/known_hosts" ] && chmod 644 "$HOME/.ssh/known_hosts"
@@ -481,11 +508,22 @@ for entry in "${APP_SETTINGS[@]}"; do
     DEST="$HOME/$src_path"
     confirm "Restore $name settings?" && {
         if [ -d "$SRC" ]; then
-            mkdir -p "$DEST"
-            cp -a "$SRC/"* "$DEST/" 2>/dev/null
+            # Empty source dir → glob doesn't expand, cp gets a literal `*`,
+            # exits 1, and set -e kills the whole script. Skip with a warn so
+            # one app's empty backup doesn't sink the rest of the restore.
+            entries=( "$SRC"/* "$SRC"/.[!.]* )
+            existing=()
+            for e in "${entries[@]}"; do [ -e "$e" ] && existing+=( "$e" ); done
+            if [ "${#existing[@]}" -eq 0 ]; then
+                warn "$name backup dir is empty — nothing to restore"
+            else
+                mkdir -p "$DEST"
+                cp -a "${existing[@]}" "$DEST/" || warn "$name: some files couldn't be copied"
+            fi
+            unset entries existing
         else
             mkdir -p "$(dirname "$DEST")"
-            cp -a "$SRC" "$DEST" 2>/dev/null
+            cp -a "$SRC" "$DEST" || warn "$name: copy failed"
         fi
         log "$name settings"
     }
