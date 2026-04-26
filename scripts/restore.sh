@@ -643,6 +643,22 @@ if [ -f "$DATA_CLASS" ]; then
         info "  These directories are created by specific apps — restore only if the app is installed."
         echo ""
     fi
+
+    # Show cloud-synced data — already restoring via account sign-in
+    CLOUD_COUNT=$(grep -c "^CLOUD-SYNCED" "$DATA_CLASS" 2>/dev/null || echo 0)
+    if [ "$CLOUD_COUNT" -gt 0 ]; then
+        info "☁ Cloud-synced sources present in backup but skipped by default:"
+        grep "^CLOUD-SYNCED" "$DATA_CLASS" | while IFS='|' read -r tag name size note; do
+            name=$(echo "$name" | xargs)
+            size=$(echo "$size" | xargs)
+            note=$(echo "$note" | xargs)
+            echo "    $name ($size) — $note"
+        done || true
+        info "  These will re-sync from iCloud after you sign in (preferred)."
+        info "  To copy from the backup drive instead, re-run with:"
+        info "    MBR_RESTORE_CLOUD=1 bash <restore-command>"
+        echo ""
+    fi
 fi
 
 # iCloud sync advisory

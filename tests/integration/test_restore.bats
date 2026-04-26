@@ -776,3 +776,18 @@ EOF
     # Reaching the final banner proves the script ran past Step 8.
     [[ "$output" == *"Setup Complete"* ]]
 }
+
+@test "step 14: CLOUD-SYNCED advisory printed when classification has cloud rows" {
+    setup_fake_backup
+    cat >> "$FAKE_BACKUP/files/_data-classification.txt" <<'EOF'
+CLOUD-SYNCED   | Documents/                              | 15G  | iCloud Desktop & Documents — re-syncs on new Mac
+CLOUD-SYNCED   | Pictures/Photos Library.photoslibrary/  | 87G  | iCloud Photos — re-downloads on new Mac
+EOF
+    mkdir -p "$FAKE_BACKUP/files"
+    run_restore_yes "$FAKE_BACKUP"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"☁ Cloud-synced sources"* ]]
+    [[ "$output" == *"MBR_RESTORE_CLOUD=1"* ]]
+    [[ "$output" == *"Documents/"* ]]
+    [[ "$output" == *"Photos Library.photoslibrary"* ]]
+}
