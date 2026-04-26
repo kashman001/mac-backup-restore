@@ -383,7 +383,14 @@ Run this on your new Mac after completing the initial macOS setup wizard (skip M
 
 ### Prerequisites
 
-Nothing. The script installs Homebrew itself in Step 2. macOS ships with bash and curl pre-installed, which is all that's needed to start. Do not install Xcode Command Line Tools or anything else manually first — the restore script handles the full setup from zero.
+Nothing required to start. The script installs Homebrew itself in Step 2. macOS ships with bash and curl pre-installed, which is all that's needed. Do not install Xcode Command Line Tools or anything else manually first — the restore script handles the full setup from zero.
+
+There are, however, **two one-time sign-ins that `brew bundle` cannot do for you**, and skipping them will leave a handful of packages unsatisfied at the end of Step 2:
+
+1. **Sign into the Mac App Store** (App Store app → top-left → sign in with your Apple ID). Required for any `mas`-managed apps in the Brewfile, e.g. Keynote, Numbers, Pages, Xcode. The `mas signin` CLI has been broken since macOS Catalina, so this must be done in the GUI.
+2. **Install the VSCode `code` CLI on PATH** if your Brewfile contains VSCode extensions. After Step 2 installs Visual Studio Code itself, open it once and run Cmd+Shift+P → "Shell Command: Install 'code' command in PATH". This only matters on first run; subsequent runs will already have `code`.
+
+Step 2 prints a pre-flight reminder listing the exact counts before prompting you. If you forget and the bundle reports unsatisfied dependencies, the restore continues anyway and adds a `brew bundle install --file=...` line to `~/.mac-restore-todo.txt` so you can finish those packages after the rest of the restore completes.
 
 ### Running
 
@@ -453,6 +460,17 @@ MBR_RESTORE_CLOUD=1 bash /Volumes/YourDrive/mac-backup-restore/scripts/restore.s
     /Volumes/YourDrive/mac-backup/<TIMESTAMP>
 ```
 
+### Re-running and recovering
+
+`restore.sh` is **idempotent and safe to re-run**. Every step prompts before doing anything, file copies are no-ops when the destination already matches, and `brew bundle` skips already-installed packages. If a phase fails or you stop the script halfway, just run the same command again — answer `n` to phases you've already completed and `y` to the rest.
+
+Two files capture state from each run, both in `$HOME`:
+
+- `~/.mac-restore.log` — full session output (banner with timestamp + backup path on each run, then everything the script printed). Colors are preserved; view with `less -R ~/.mac-restore.log`. New runs append, so a single file accumulates history across re-runs.
+- `~/.mac-restore-todo.txt` — manual follow-ups the script couldn't automate. Re-created on each run, so it always reflects the most recent restore. Includes things like Brewfile dependencies that didn't satisfy on the first pass, JetBrains Toolbox install reminders, browser extensions to reinstall, etc.
+
+After the script finishes, the summary at the bottom points at both files.
+
 ---
 
 ## How to Use: Verify
@@ -474,7 +492,7 @@ Each check is either a pass (green checkmark), fail (red X), or skip (blue info,
 
 ## Testing
 
-The toolkit ships with a [bats-core](https://github.com/bats-core/bats-core) test suite (195 tests across five files) that exercises every script and config file. Tests run under stock macOS `/bin/bash` (3.2.57) — the same shell the toolkit promises to support — so the harness validates that promise on every run.
+The toolkit ships with a [bats-core](https://github.com/bats-core/bats-core) test suite (231 tests across five files) that exercises every script and config file. Tests run under stock macOS `/bin/bash` (3.2.57) — the same shell the toolkit promises to support — so the harness validates that promise on every run.
 
 ### Running
 

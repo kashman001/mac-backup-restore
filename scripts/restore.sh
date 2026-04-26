@@ -51,13 +51,50 @@ if [ -z "$BACKUP" ] || [ ! -d "$BACKUP" ]; then
     exit 1
 fi
 
+# Tee everything to a log file so failures (especially in long phases like
+# brew bundle) can be post-mortemed without scrollback hunting. Append so
+# repeated runs build up a history; banner separates each run.
+LOG_FILE="$HOME/.mac-restore.log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+echo "=== mac-restore: $(date) — backup: $BACKUP ==="
+
 header "New Mac Setup — Clean Install"
 info "Restoring from: $BACKUP"
+info "Logging to:     $LOG_FILE"
 echo ""
 
 # Track what needs manual attention (write to HOME, not the backup drive)
 MANUAL_TODO="$HOME/.mac-restore-todo.txt"
 > "$MANUAL_TODO"
+
+# Pre-flight reminder for things `brew bundle` can't satisfy on a fresh Mac:
+# VSCode extensions need the `code` CLI on PATH, and MAS apps need the user
+# signed into the App Store. Detecting these up-front turns a confusing
+# post-failure hunt into a one-time checklist.
+preflight_for_brewfile() {
+    local brewfile="$1"
+    [ -f "$brewfile" ] || return 0
+    local vscode_count mas_count
+    vscode_count=$(grep -c '^vscode ' "$brewfile" 2>/dev/null || true)
+    mas_count=$(grep -c    '^mas '    "$brewfile" 2>/dev/null || true)
+    : "${vscode_count:=0}"; : "${mas_count:=0}"
+
+    local printed=0
+    if [ "$vscode_count" -gt 0 ] && ! has code; then
+        warn "First-run prerequisites detected:"
+        echo "    • $vscode_count VSCode extension(s) in this Brewfile, but the 'code' CLI is not on PATH."
+        echo "      Open Visual Studio Code, then Cmd+Shift+P → 'Shell Command: Install code command in PATH'."
+        printed=1
+    fi
+    if [ "$mas_count" -gt 0 ]; then
+        [ "$printed" -eq 0 ] && warn "First-run prerequisites detected:"
+        echo "    • $mas_count Mac App Store app(s) in this Brewfile."
+        echo "      Open the App Store and sign in with the same Apple ID used on the old Mac."
+        printed=1
+    fi
+    [ "$printed" -eq 1 ] && echo ""
+    return 0
+}
 
 # ── Step 0: macOS Preferences ───────────────────────────────────────────────
 phase "macOS Preferences"
@@ -146,11 +183,12 @@ if [ -f "$BREWFILE" ]; then
     echo "    Taps:     $(grep -c '^tap '  "$BREWFILE" 2>/dev/null || echo 0)"
     echo "    MAS apps: $(grep -c '^mas '  "$BREWFILE" 2>/dev/null || echo 0)"
     echo ""
+    preflight_for_brewfile "$BREWFILE"
     confirm "Install from original Brewfile?" && {
         if brew bundle --file="$BREWFILE"; then
             log "Original Brewfile packages installed"
         else
-            warn "brew bundle reported unsatisfied dependencies (see output above)"
+            warn "brew bundle reported unsatisfied dependencies (full output in $LOG_FILE)"
             warn "Continuing with restore — handle them and re-run brew bundle later"
             echo "  - Re-run: brew bundle install --file=\"$BREWFILE\"" >> "$MANUAL_TODO"
         fi
@@ -165,11 +203,12 @@ if [ -f "$BREWFILE_ADDON" ] && [ -s "$BREWFILE_ADDON" ]; then
     info "These were installed manually on the old Mac but have Brew casks:"
     cat "$BREWFILE_ADDON" | sed 's/^/    /'
     echo ""
+    preflight_for_brewfile "$BREWFILE_ADDON"
     confirm "Install these via Homebrew? (recommended — cleaner updates)" && {
         if brew bundle --file="$BREWFILE_ADDON"; then
             log "Addon apps installed via Homebrew"
         else
-            warn "brew bundle reported unsatisfied addon dependencies (see output above)"
+            warn "brew bundle reported unsatisfied addon dependencies (full output in $LOG_FILE)"
             warn "Continuing with restore — handle them and re-run brew bundle later"
             echo "  - Re-run: brew bundle install --file=\"$BREWFILE_ADDON\"" >> "$MANUAL_TODO"
         fi
@@ -924,7 +963,12 @@ if [ -s "$MANUAL_TODO" ]; then
     warn "Manual steps still needed:"
     cat "$MANUAL_TODO" | sed 's/^/    /'
     echo ""
+    info "  Saved to: $MANUAL_TODO"
 fi
+
+info "Full session log: $LOG_FILE"
+info "  View with colors: less -R $LOG_FILE"
+echo ""
 
 info "What the restore script handled automatically:"
 echo "    ✓ Homebrew packages and casks (including migrated manual installs)"

@@ -206,6 +206,63 @@ teardown() {
     mock_calls brew | grep -q "/software-inventory/Brewfile"
 }
 
+@test "step 2: preflight warns about VSCode extensions when 'code' is not on PATH" {
+    setup_fake_backup
+    # Brewfile contains a vscode extension; remove the default `code` mock and
+    # restrict PATH so a real `code` (e.g. /usr/local/bin/code installed on the
+    # host) doesn't satisfy `has code`. Without this restriction, the test is
+    # host-dependent and silently skips the warning we're trying to assert.
+    echo 'vscode "github.copilot"' >> "$FAKE_BACKUP/software-inventory/Brewfile"
+    rm -f "$MOCK_BIN/code"
+    run /bin/bash -c "
+        export PATH='$MOCK_BIN:/usr/bin:/bin:/usr/sbin:/sbin'
+        printf 'y%.0s' \$(seq 1 400) |
+        /bin/bash '$SCRIPTS_DIR/restore.sh' '$FAKE_BACKUP'
+    "
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"First-run prerequisites detected"* ]]
+    [[ "$output" == *"VSCode extension"* ]]
+    [[ "$output" == *"Install code command in PATH"* ]]
+}
+
+@test "step 2: preflight does NOT warn about VSCode when 'code' is on PATH" {
+    setup_fake_backup
+    echo 'vscode "github.copilot"' >> "$FAKE_BACKUP/software-inventory/Brewfile"
+    # Default mock for `code` is present, so `has code` returns true.
+    run_restore_yes "$FAKE_BACKUP"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"VSCode extension"* ]]
+}
+
+@test "step 2: preflight warns about MAS apps in the Brewfile" {
+    setup_fake_backup
+    # Brewfile contains a `mas` line; preflight should always remind the user
+    # to sign into the App Store (we can't reliably detect sign-in state).
+    echo 'mas "Keynote", id: 409183694' >> "$FAKE_BACKUP/software-inventory/Brewfile"
+    run_restore_yes "$FAKE_BACKUP"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Mac App Store app"* ]]
+    [[ "$output" == *"sign in"* ]]
+}
+
+@test "step 2: preflight prints nothing when Brewfile has no vscode/mas entries" {
+    setup_fake_backup
+    # Default Brewfile only has `tap "homebrew/cask"`. Preflight stays silent.
+    run_restore_yes "$FAKE_BACKUP"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"First-run prerequisites detected"* ]]
+}
+
+@test "session log file is created at \$HOME/.mac-restore.log and captures script output" {
+    setup_fake_backup
+    run_restore_yes "$FAKE_BACKUP"
+    [ "$status" -eq 0 ]
+    [ -f "$HOME/.mac-restore.log" ]
+    # The session banner and a known phase header should both be in the log.
+    grep -q "=== mac-restore:" "$HOME/.mac-restore.log"
+    grep -q "New Mac Setup" "$HOME/.mac-restore.log"
+}
+
 @test "step 2: brew bundle failure does NOT abort the restore" {
     setup_fake_backup
     # Make `brew bundle ...` exit non-zero, but keep `brew` itself usable for
