@@ -266,6 +266,11 @@ EOF
 @test "step 3: when mas missing, brew install mas is attempted" {
     setup_fake_backup
     rm -f "$MOCK_BIN/mas"
+    # Restrict PATH so that a real mas installation (e.g. /opt/homebrew/bin/mas)
+    # is not visible to restore.sh. setup_mock_path only prepends MOCK_BIN; without
+    # this override, removing the mock stub falls through to the real binary and
+    # `has mas` returns true, skipping the `brew install mas` call.
+    export PATH="$MOCK_BIN:/usr/bin:/bin"
     cat > "$FAKE_BACKUP/software-inventory/mac-app-store.txt" <<EOF
 409183694 Keynote
 EOF
