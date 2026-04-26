@@ -307,6 +307,14 @@ Cloud-native data (anything in iCloud, OneDrive, 1Password) will re-sync when yo
 
 **set -euo pipefail in every script.** All scripts use bash strict mode: `-e` exits on any error, `-u` treats unset variables as errors, and `-o pipefail` catches failures in piped commands. This prevents silent failures — if something goes wrong, you'll know immediately rather than ending up with a half-completed backup.
 
+**Strict-mode pitfalls.** Strict mode has three traps that produce silent script aborts mid-phase. New code touching these scripts must avoid them:
+
+1. **Pipelines with an "expected to sometimes fail" intermediate component.** Under `pipefail`, a `find` that hits a permission error or a `grep` that finds no match exits non-zero, propagates through the pipeline, and `set -e` kills the script — the user sees no error because stderr is suppressed by `2>/dev/null`. Append `|| true` to any such pipeline (e.g. `find "$HOME" ... | while read -r f; do …; done || true`).
+2. **`((var++))` inside an if-body inside a function**, when `var` was 0. Bash's arithmetic command exits 1 when the result is 0, and the usual `set -e` exemption for arithmetic commands breaks in that specific syntactic context. This silently aborted `verify.sh` after the very first check increment. Use `: $((var++))` instead — `:` always exits 0, and the `$((…))` is arithmetic *expansion* (string substitution that still mutates the variable).
+3. **`var=$(cmd | wc -l | tr -d ' ')` when `cmd` can fail.** Under `pipefail`, the assignment exits non-zero and `set -e` kills the script. Append `|| echo 0` (when a numeric default works) or `|| true` (when an empty value is fine) to the pipeline.
+
+The bats test suite contains regression tests with `REGRESSION:` in their name documenting each instance — `grep -n "REGRESSION:" tests/` to find them.
+
 **Parallel VS Code extension installation.** The restore script installs VS Code extensions in parallel (backgrounding each `code --install-extension` call and waiting for all to finish). Extensions are independent of each other, so parallel installation is safe and significantly faster than sequential.
 
 ---
