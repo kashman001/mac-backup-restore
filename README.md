@@ -492,7 +492,7 @@ Each check is either a pass (green checkmark), fail (red X), or skip (blue info,
 
 ## Testing
 
-The toolkit ships with a [bats-core](https://github.com/bats-core/bats-core) test suite (236 tests across five files) that exercises every script and config file. Tests run under stock macOS `/bin/bash` (3.2.57) — the same shell the toolkit promises to support — so the harness validates that promise on every run.
+The toolkit ships with a [bats-core](https://github.com/bats-core/bats-core) test suite (244 tests across five files) that exercises every script and config file. Tests run under stock macOS `/bin/bash` (3.2.57) — the same shell the toolkit promises to support — so the harness validates that promise on every run.
 
 ### Running
 

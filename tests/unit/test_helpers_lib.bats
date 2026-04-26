@@ -311,3 +311,36 @@ EOF
     mock_command_failing defaults
     ! is_icloud_tv_enabled
 }
+
+# ── trim() ──────────────────────────────────────────────────────────────────
+
+@test "trim: strips leading and trailing whitespace" {
+    [ "$(trim '   hello   ')" = "hello" ]
+}
+
+@test "trim: leaves internal whitespace alone" {
+    [ "$(trim '   hello world   ')" = "hello world" ]
+}
+
+@test "trim: handles tabs and mixed whitespace" {
+    [ "$(trim $'\t  hello\t')" = "hello" ]
+}
+
+@test "trim: empty input returns empty string" {
+    [ "$(trim '')" = "" ]
+}
+
+@test "trim: whitespace-only input returns empty string" {
+    [ "$(trim '   ')" = "" ]
+}
+
+@test "trim: input with single quote does NOT crash (vs xargs failure mode)" {
+    # Real bug regression: previous code did `echo "\$x" | xargs` which exited
+    # non-zero on unbalanced quotes, killing restore.sh under set -euo pipefail
+    # whenever a Steam game name like "Don't Starve" was in the inventory.
+    [ "$(trim "  Don't Starve  ")" = "Don't Starve" ]
+}
+
+@test "trim: input with double quote does NOT crash" {
+    [ "$(trim '  say "hi"  ')" = 'say "hi"' ]
+}

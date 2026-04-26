@@ -303,7 +303,7 @@ if [ -f "$SOURCES" ]; then
     if [ -n "$MANUAL_APPS" ]; then
         warn "These apps need manual download/install:"
         echo "$MANUAL_APPS" | while IFS='|' read -r source app rest; do
-            app=$(echo "$app" | xargs)
+            app=$(trim "$app")
             echo "    $app"
             echo "  - Download and install: $app" >> "$MANUAL_TODO"
         done
@@ -357,9 +357,9 @@ CROSSOVER_GAMES="$BACKUP/software-inventory/steam/crossover-games.txt"
 if [ -f "$STEAM_GAMES" ] && [ -s "$STEAM_GAMES" ]; then
     info "Steam games from old Mac (native macOS):"
     while IFS='|' read -r appid name size; do
-        name=$(echo "$name" | xargs)
-        size=$(echo "$size" | xargs)
-        log "  $name ($size) — steam://install/$(echo "$appid" | xargs)"
+        name=$(trim "$name")
+        size=$(trim "$size")
+        log "  $name ($size) — steam://install/$(trim "$appid")"
     done < "$STEAM_GAMES"
     echo ""
     info "After installing Steam, sign in and redownload these games"
@@ -369,8 +369,8 @@ if [ -f "$CROSSOVER_GAMES" ] && [ -s "$CROSSOVER_GAMES" ]; then
     echo ""
     info "CrossOver/Steam games (Windows games via CrossOver):"
     while IFS='|' read -r appid name rest; do
-        name=$(echo "$name" | xargs)
-        log "  $name (App ID: $(echo "$appid" | xargs))"
+        name=$(trim "$name")
+        log "  $name (App ID: $(trim "$appid"))"
     done < "$CROSSOVER_GAMES"
     echo ""
     warn "These require CrossOver + Steam for Windows to be set up"
@@ -573,7 +573,7 @@ if [ -d "$BROWSER_EXT" ] && [ "$(ls -A "$BROWSER_EXT" 2>/dev/null)" ]; then
         count=$(wc -l < "$ext_file" | tr -d ' ')
         info "$browser ($count extensions):"
         while IFS='|' read -r eid name version; do
-            name=$(echo "$name" | xargs)
+            name=$(trim "$name")
             [ -n "$name" ] && echo "    $name"
         done < "$ext_file"
         echo ""
@@ -711,8 +711,8 @@ if [ -f "$DATA_CLASS" ]; then
     if [ "$STALE_COUNT" -gt 0 ]; then
         warn "Stale data (old device sync artifacts):"
         grep "^STALE" "$DATA_CLASS" | while IFS='|' read -r tag name size; do
-            name=$(echo "$name" | xargs)
-            size=$(echo "$size" | xargs)
+            name=$(trim "$name")
+            size=$(trim "$size")
             echo "    $name ($size)"
         done
         info "  Recommendation: skip these. They're from old Macs and will clutter the new one."
@@ -724,9 +724,9 @@ if [ -f "$DATA_CLASS" ]; then
     if [ "$ARCHIVAL_COUNT" -gt 0 ]; then
         warn "Archival data (large, rarely accessed):"
         grep "^ARCHIVAL" "$DATA_CLASS" | while IFS='|' read -r tag name size note; do
-            name=$(echo "$name" | xargs)
-            size=$(echo "$size" | xargs)
-            note=$(echo "$note" | xargs)
+            name=$(trim "$name")
+            size=$(trim "$size")
+            note=$(trim "$note")
             echo "    $name ($size) — $note"
         done
         info "  Recommendation: keep on external drive or move to cloud storage."
@@ -738,8 +738,8 @@ if [ -f "$DATA_CLASS" ]; then
     if [ "$APP_DATA_COUNT" -gt 0 ]; then
         info "App-generated data:"
         grep "^APP-DATA" "$DATA_CLASS" | while IFS='|' read -r tag name size note; do
-            name=$(echo "$name" | xargs)
-            size=$(echo "$size" | xargs)
+            name=$(trim "$name")
+            size=$(trim "$size")
             echo "    $name ($size)"
         done
         info "  These directories are created by specific apps — restore only if the app is installed."
@@ -751,9 +751,9 @@ if [ -f "$DATA_CLASS" ]; then
     if [ "$CLOUD_COUNT" -gt 0 ]; then
         info "☁ Cloud-synced sources present in backup but skipped by default:"
         grep "^CLOUD-SYNCED" "$DATA_CLASS" | while IFS='|' read -r tag name size note; do
-            name=$(echo "$name" | xargs)
-            size=$(echo "$size" | xargs)
-            note=$(echo "$note" | xargs)
+            name=$(trim "$name")
+            size=$(trim "$size")
+            note=$(trim "$note")
             echo "    $name ($size) — $note"
         done || true
         info "  These will re-sync from iCloud after you sign in (preferred)."

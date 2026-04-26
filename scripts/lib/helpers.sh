@@ -40,6 +40,16 @@ has() {
     command -v "$1" &>/dev/null
 }
 
+# Strip leading and trailing whitespace from $1.
+# Pure bash 3.2 — does NOT pipe through xargs, which would choke on input
+# containing unbalanced quotes (e.g. a Steam game name like "Don't Starve").
+trim() {
+    local s="$1"
+    s="${s#"${s%%[![:space:]]*}"}"
+    s="${s%"${s##*[![:space:]]}"}"
+    printf '%s' "$s"
+}
+
 # Look up a value by key in a pipe-delimited array.
 # Usage: lookup KEY "${ARRAY[@]}"
 # Prints value and returns 0 if found, returns 1 if not.

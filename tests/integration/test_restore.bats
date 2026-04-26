@@ -473,6 +473,21 @@ EOF
     [[ "$output" == *"Half-Life 2"* ]]
 }
 
+@test "REGRESSION step 7: game name with apostrophe does NOT crash xargs/trim" {
+    # Real bug: when a Steam game name contains a single or double quote
+    # (e.g. "Don't Starve"), the old `echo "\$name" | xargs` whitespace-trim
+    # trick blew up with "xargs: unterminated quote" and the script exited
+    # mid-restore with set -euo pipefail. Pure-bash trim() handles it.
+    setup_fake_backup
+    mkdir -p "$FAKE_BACKUP/software-inventory/steam"
+    cat > "$FAKE_BACKUP/software-inventory/steam/installed-games.txt" <<EOF
+219740|Don't Starve|400 MB
+EOF
+    run_restore_yes "$FAKE_BACKUP"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Don't Starve"* ]]
+}
+
 # ── Step 8 — Dotfiles & Config ─────────────────────────────────────────────
 
 @test "step 8: dotfile is restored to \$HOME" {
