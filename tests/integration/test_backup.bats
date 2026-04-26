@@ -1061,6 +1061,43 @@ EOF
         | grep -q '^[[:space:]]*return 0$'
 }
 
+@test "REGRESSION: Branch 2 passes --exclude as a single arg even when path contains spaces (C4)" {
+    # Bug: $(cloud_excludes) was word-split unquoted, so
+    # `--exclude=Photos Library.photoslibrary` became two rsync args:
+    # `--exclude=Photos` (matches nothing) and `Library.photoslibrary`
+    # (treated as a stray source path). rsync errored with status 23,
+    # set -e killed the script, AND the actual Photos Library was copied.
+    # Fix: build excludes as an array; pass with "${arr[@]}" preserving args.
+    # Test: record rsync args one-per-line and assert the full string is
+    # present as a SINGLE arg.
+    prep_required_home_dirs
+    mkdir -p "$FAKE_HOME/Pictures/Photos Library.photoslibrary"
+    echo "x" > "$FAKE_HOME/Pictures/Photos Library.photoslibrary/db"
+    echo "y" > "$FAKE_HOME/Pictures/imported.jpg"
+    mock_command_script defaults <<'EOF'
+case "$@" in
+    *cloudphotod*CPLEngineParameters-SystemLibrary*) echo "x"; exit 0 ;;
+esac
+exit 1
+EOF
+    # Record one arg per line so we can grep -Fx for an exact arg match.
+    # Unquoted heredoc so $MOCK_BIN expands at fixture-creation time and the
+    # path is baked into the stub. \$@ stays literal for the stub's runtime.
+    mock_command_script rsync <<EOF
+printf '%s\n' "\$@" >> "$MOCK_BIN/rsync.argv"
+exit 0
+EOF
+    run_backup_yes
+    [ "$status" -eq 0 ]
+    # The exact string "--exclude=Photos Library.photoslibrary" must appear
+    # as a single line (i.e. a single rsync arg). grep -Fx matches the
+    # whole line literally.
+    grep -Fxq -- '--exclude=Photos Library.photoslibrary' "$MOCK_BIN/rsync.argv"
+    # And it must NOT have been split: the lone fragment "--exclude=Photos"
+    # must not appear as its own line.
+    ! grep -Fxq -- '--exclude=Photos' "$MOCK_BIN/rsync.argv"
+}
+
 @test "REGRESSION: _cloud_excludes_for actually returns 0 when last entry does not match queried name" {
     # Behavioral test: invoke the function with a CLOUD_DETECTED whose final
     # SUB entry does NOT match the queried parent — this is the case that hit

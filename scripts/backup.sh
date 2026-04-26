@@ -1165,8 +1165,16 @@ for dir in "$HOME/Documents" "$HOME/Desktop" "$HOME/Downloads" "$HOME/Pictures" 
     fi
 
     # Branch 2: dir contains known cloud-managed subfolders → rsync --exclude.
-    cloud_excludes=$(_cloud_excludes_for "$name")
-    if [ -n "$cloud_excludes" ]; then
+    # Build excludes as an ARRAY so paths with spaces (e.g. "Photos Library.photoslibrary")
+    # are passed as single args. Earlier versions used word-splitting on an unquoted
+    # variable, which broke `--exclude=Photos Library.photoslibrary` into the wrong
+    # pieces and made rsync error out (status 23), aborting the whole script under
+    # set -euo pipefail.
+    cloud_excludes_arr=()
+    while IFS= read -r excl; do
+        [ -n "$excl" ] && cloud_excludes_arr+=("$excl")
+    done < <(_cloud_excludes_for "$name")
+    if [ "${#cloud_excludes_arr[@]}" -gt 0 ]; then
         warn "☁ $name — found cloud-managed subfolder(s), will be excluded:"
         for entry in "${CLOUD_DETECTED[@]}"; do
             kind="${entry%%|*}"; rest="${entry#*|}"
@@ -1181,11 +1189,10 @@ for dir in "$HOME/Documents" "$HOME/Desktop" "$HOME/Downloads" "$HOME/Pictures" 
             fi
         done
         confirm "Back up $name (cloud subfolder(s) excluded)?" && {
-            # shellcheck disable=SC2086 - $cloud_excludes is intentionally word-split into multiple --exclude flags.
             rsync -a --progress \
                 --exclude='.DS_Store' \
                 --exclude='workspace/.metadata' \
-                $cloud_excludes \
+                "${cloud_excludes_arr[@]}" \
                 "$dir/" "$FILES/$name/" 2>/dev/null
             log "$name (cloud subfolders excluded)"
         }
