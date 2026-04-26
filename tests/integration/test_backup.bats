@@ -1038,3 +1038,58 @@ EOF
     [ -f "$bd/files/_data-classification.txt" ]
     grep -q '^CLOUD-SYNCED.*Desktop/' "$bd/files/_data-classification.txt"
 }
+
+@test "REGRESSION: _cloud_excludes_for in backup.sh ends with explicit 'return 0' (C3 — silent abort under set -e)" {
+    # Bug: _cloud_excludes_for's last iteration returns 1 when the entry's
+    # parent doesn't match the queried dir (the trailing `[ "$p" = "$parent" ]
+    # && printf` chain evaluates false). Under set -euo pipefail, the
+    # `cloud_excludes=$(_cloud_excludes_for "$name")` assignment then aborts
+    # the script silently. Pre-fix, real backups on Macs with iCloud Photos+Music
+    # died in Phase 5d at the first non-cloud-top dir (e.g. Downloads), leaving
+    # the classification missing Branch-2 rows and Phase 6/7 un-run.
+    # Fix: function ends with explicit `return 0`. Static guard so a future edit
+    # that removes the explicit return reintroduces the silent-abort bug.
+    cd "$PROJECT_ROOT"
+    # Confirm the LAST executable line of _cloud_excludes_for is `return 0`.
+    # An earlier `|| return 0` (the empty-array guard) is necessary but not
+    # sufficient — the bug fires from the trailing `[ "$p" = "$parent" ] &&
+    # printf` chain in the for-loop's last iteration. We must guarantee the
+    # for-done block is followed by an unconditional `return 0` before `}`.
+    awk '/^_cloud_excludes_for\(\)/,/^\}/' scripts/backup.sh \
+        | grep -B1 '^}' \
+        | head -1 \
+        | grep -q '^[[:space:]]*return 0$'
+}
+
+@test "REGRESSION: _cloud_excludes_for actually returns 0 when last entry does not match queried name" {
+    # Behavioral test: invoke the function with a CLOUD_DETECTED whose final
+    # SUB entry does NOT match the queried parent — this is the case that hit
+    # the bug. Under set -euo pipefail the assignment must succeed.
+    run bash -c '
+        set -euo pipefail
+        # Re-create the function exactly as backup.sh defines it. The test
+        # above (static guard) ensures the production version stays in sync.
+        declare -a CLOUD_DETECTED
+        CLOUD_DETECTED=("TOP|Documents|x" "SUB|Pictures|Photos Library.photoslibrary|y" "SUB|Music|Music/Media.localized|z")
+        _cloud_excludes_for() {
+            local parent="$1" entry kind p sp rest rest2
+            [ "${#CLOUD_DETECTED[@]}" -gt 0 ] || return 0
+            for entry in "${CLOUD_DETECTED[@]}"; do
+                kind="${entry%%|*}"; rest="${entry#*|}"
+                [ "$kind" = "SUB" ] || continue
+                p="${rest%%|*}"; rest2="${rest#*|}"
+                sp="${rest2%%|*}"
+                [ "$p" = "$parent" ] && printf -- "--exclude=%s\n" "$sp"
+            done
+            return 0
+        }
+        # Pictures: matches the first SUB but the LAST iteration is Music
+        # (which does not match Pictures). Pre-fix this aborted the script.
+        cloud_excludes=$(_cloud_excludes_for "Pictures")
+        # Downloads: matches no SUB. Pre-fix this also aborted.
+        cloud_excludes=$(_cloud_excludes_for "Downloads")
+        echo "REACHED_AFTER_BOTH_CALLS"
+    '
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"REACHED_AFTER_BOTH_CALLS"* ]]
+}

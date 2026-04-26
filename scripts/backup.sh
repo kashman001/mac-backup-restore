@@ -1136,6 +1136,11 @@ _cloud_excludes_for() {
         sp="${rest2%%|*}"
         [ "$p" = "$parent" ] && printf -- "--exclude=%s\n" "$sp"
     done
+    # Explicit success: the last iteration's `[ "$p" = "$parent" ] && printf` chain
+    # exits 1 when the entry's parent doesn't match — without this `return 0` the
+    # function returns the loop's last exit status, which propagates through the
+    # `cloud_excludes=$(...)` assignment under set -e and silently kills the script.
+    return 0
 }
 
 for dir in "$HOME/Documents" "$HOME/Desktop" "$HOME/Downloads" "$HOME/Pictures" "$HOME/Music" "$HOME/Movies"; do
