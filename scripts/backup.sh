@@ -1154,6 +1154,35 @@ for dir in "$HOME/Documents" "$HOME/Desktop" "$HOME/Downloads" "$HOME/Pictures" 
         continue
     fi
 
+    # Branch 2: dir contains known cloud-managed subfolders → rsync --exclude.
+    cloud_excludes=$(_cloud_excludes_for "$name")
+    if [ -n "$cloud_excludes" ]; then
+        warn "☁ $name — found cloud-managed subfolder(s), will be excluded:"
+        for entry in "${CLOUD_DETECTED[@]}"; do
+            kind="${entry%%|*}"; rest="${entry#*|}"
+            [ "$kind" = "SUB" ] || continue
+            p="${rest%%|*}"; rest2="${rest#*|}"
+            sp="${rest2%%|*}"; lbl="${rest2##*|}"
+            if [ "$p" = "$name" ]; then
+                info "    - $sp ($lbl)"
+                # Compute the excluded subfolder's actual size so the row is informative.
+                sub_size=$(du -sh "$dir/$sp" 2>/dev/null | cut -f1)
+                echo "CLOUD-SYNCED   | $name/$sp/ | ${sub_size:-?} | $lbl — re-syncs on new Mac" >> "$DATA_CLASS"
+            fi
+        done
+        confirm "Back up $name (cloud subfolder(s) excluded)?" && {
+            # shellcheck disable=SC2086 - $cloud_excludes is intentionally word-split into multiple --exclude flags.
+            rsync -a --progress \
+                --exclude='.DS_Store' \
+                --exclude='workspace/.metadata' \
+                $cloud_excludes \
+                "$dir/" "$FILES/$name/" 2>/dev/null
+            log "$name (cloud subfolders excluded)"
+        }
+        continue
+    fi
+
+    # Branch 3: no cloud sync — existing behavior.
     confirm "Back up $name ($SIZE on disk)?" && {
         rsync -a --progress \
             --exclude='.DS_Store' \

@@ -970,3 +970,55 @@ EOF
     [ -d "$bd/files/Documents" ]
     [ -f "$bd/files/Documents/note.txt" ]
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 5 — Branch 2: cloud subfolder rsync --exclude
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "phase 5: Pictures with iCloud Photos excludes Photos Library from rsync" {
+    prep_required_home_dirs
+    mkdir -p "$FAKE_HOME/Pictures/Photos Library.photoslibrary"
+    echo "fake" > "$FAKE_HOME/Pictures/Photos Library.photoslibrary/Library.apdb"
+    echo "imported" > "$FAKE_HOME/Pictures/imported-photo.jpg"
+    # Mock defaults to report iCloud Photos enabled (matches Task 5 fix:
+    # checks com.apple.cloudphotod CPLEngineParameters-SystemLibrary).
+    mock_command_script defaults <<'EOF'
+case "$@" in
+    *cloudphotod*CPLEngineParameters-SystemLibrary*) echo "fake-path"; exit 0 ;;
+esac
+exit 1
+EOF
+    # Capture rsync invocation to assert --exclude.
+    mock_command_script rsync <<'EOF'
+echo "$@" >> "$MOCK_BIN/rsync.calls"
+exit 0
+EOF
+    run_backup_yes
+    [ "$status" -eq 0 ]
+    bd=$(backup_dir)
+    grep -q '^CLOUD-SYNCED.*Photos Library.photoslibrary' "$bd/files/_data-classification.txt"
+    grep -q -- '--exclude=Photos Library.photoslibrary' "$MOCK_BIN/rsync.calls"
+}
+
+@test "phase 5: Pictures with iCloud Photos OFF backs up everything (regression guard)" {
+    prep_required_home_dirs
+    mkdir -p "$FAKE_HOME/Pictures/Photos Library.photoslibrary"
+    echo "fake" > "$FAKE_HOME/Pictures/Photos Library.photoslibrary/Library.apdb"
+    # Override defaults to fail for cloudphotod query so is_icloud_photos_enabled
+    # returns false — the default silent mock exits 0 (success) which would
+    # incorrectly report Photos sync as enabled.
+    mock_command_script defaults <<'EOF'
+case "$@" in
+    *cloudphotod*CPLEngineParameters-SystemLibrary*) exit 1 ;;
+esac
+exit 0
+EOF
+    mock_command_script rsync <<'EOF'
+echo "$@" >> "$MOCK_BIN/rsync.calls"
+exit 0
+EOF
+    run_backup_yes
+    [ "$status" -eq 0 ]
+    # No --exclude for Photos Library in any rsync call.
+    ! grep -q -- '--exclude=Photos Library.photoslibrary' "$MOCK_BIN/rsync.calls"
+}
