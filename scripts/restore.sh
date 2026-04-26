@@ -738,9 +738,12 @@ if [ -d "$FILES_SRC" ]; then
             Screenshots|scattered-credentials|auth-tokens) continue ;;
         esac
         # Skip items the backup classified as CLOUD-SYNCED unless user opted in.
+        # The grep pattern anchors on the exact column-2 value "<name>/ |" so
+        # that a Branch-2 row like "Pictures/Photos Library.photoslibrary/"
+        # does NOT cause the "Pictures" parent to be skipped (C1 regression fix).
         if [ -f "$DATA_CLASS" ] \
            && [ "${MBR_RESTORE_CLOUD:-}" != "1" ] \
-           && grep -q "^CLOUD-SYNCED.*${name}/" "$DATA_CLASS" 2>/dev/null; then
+           && grep -q "^CLOUD-SYNCED *| *${name}/ *|" "$DATA_CLASS" 2>/dev/null; then
             info "  ☁ skipping $name — cloud-synced (re-syncs from iCloud)"
             continue
         fi

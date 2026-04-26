@@ -829,3 +829,20 @@ EOF
     [ "$status" -eq 0 ]
     grep -q "files/Documents" "$MOCK_BIN/rsync.calls"
 }
+
+@test "step 14: Branch 2 row does NOT cause parent dir to be skipped (C1 regression)" {
+    setup_fake_backup
+    mkdir -p "$FAKE_BACKUP/files/Pictures"
+    echo "imported-photo" > "$FAKE_BACKUP/files/Pictures/imported-photo.jpg"
+    cat >> "$FAKE_BACKUP/files/_data-classification.txt" <<'EOF'
+CLOUD-SYNCED   | Pictures/Photos Library.photoslibrary/ | 87G | iCloud Photos — re-syncs on new Mac
+EOF
+    mock_command_script rsync <<'EOF'
+echo "$@" >> "$MOCK_BIN/rsync.calls"
+exit 0
+EOF
+    run_restore_yes "$FAKE_BACKUP"
+    [ "$status" -eq 0 ]
+    # Pictures (the parent) is NOT cloud-synced as a whole → rsync MUST be called for it.
+    grep -q "files/Pictures" "$MOCK_BIN/rsync.calls"
+}
