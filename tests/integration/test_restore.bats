@@ -51,9 +51,9 @@ setup_fake_backup() {
 install_default_mocks() {
     local cmd
     for cmd in brew mas defaults softwareupdate xcode-select chflags csrutil \
-               osascript code cursor git ssh-add gpg npm pip3 pipx cargo gem \
-               go conda chsh dscl killall sw_vers crontab rsync python3 \
-               curl plutil docker; do
+               osascript code cursor git ssh-add ssh-keyscan gpg npm pip3 pipx \
+               cargo gem go conda chsh dscl killall sw_vers crontab rsync \
+               python3 curl plutil docker; do
         mock_command "$cmd"
     done
 }
@@ -195,6 +195,51 @@ teardown() {
 }
 
 # ── Step 2 — Homebrew ──────────────────────────────────────────────────────
+
+@test "step 2 bootstrap: brew install git/gh/claude-code is invoked before Brewfile" {
+    setup_fake_backup
+    run_restore_yes "$FAKE_BACKUP"
+    [ "$status" -eq 0 ]
+    # The bootstrap line is `brew install git gh claude-code`. mock_calls
+    # records the argv on each invocation, one line per call.
+    mock_calls brew | grep -q "install git gh claude-code"
+    [[ "$output" == *"bootstrap essentials"* ]]
+}
+
+@test "step 2 bootstrap: SSH keys are restored before the Brewfile install" {
+    setup_fake_backup
+    mkdir -p "$FAKE_BACKUP/config/ssh"
+    echo "fake-private-key" > "$FAKE_BACKUP/config/ssh/id_ed25519"
+    echo "fake-pub" > "$FAKE_BACKUP/config/ssh/id_ed25519.pub"
+    run_restore_yes "$FAKE_BACKUP"
+    [ "$status" -eq 0 ]
+    [ -f "$HOME/.ssh/id_ed25519" ]
+    [ "$(stat -f '%Lp' "$HOME/.ssh/id_ed25519")" = "600" ]
+    [[ "$output" == *"SSH keys restored (bootstrap"* ]]
+}
+
+@test "step 2 bootstrap: gh hosts.yml is restored before the Brewfile install" {
+    setup_fake_backup
+    mkdir -p "$FAKE_BACKUP/files/auth-tokens/gh"
+    echo 'github.com: { user: foo }' > "$FAKE_BACKUP/files/auth-tokens/gh/hosts.yml"
+    run_restore_yes "$FAKE_BACKUP"
+    [ "$status" -eq 0 ]
+    [ -f "$HOME/.config/gh/hosts.yml" ]
+    [ "$(stat -f '%Lp' "$HOME/.config/gh/hosts.yml")" = "600" ]
+    [[ "$output" == *"GitHub CLI auth restored (bootstrap"* ]]
+}
+
+@test "step 2 bootstrap: ssh-keyscan adds github.com to known_hosts when missing" {
+    setup_fake_backup
+    # Make ssh-keyscan emit a fake github.com entry so the script appends it.
+    mock_command_script ssh-keyscan <<'EOF'
+echo "github.com ssh-rsa FAKEKEYDATA"
+EOF
+    run_restore_yes "$FAKE_BACKUP"
+    [ "$status" -eq 0 ]
+    [ -f "$HOME/.ssh/known_hosts" ]
+    grep -q "^github.com " "$HOME/.ssh/known_hosts"
+}
 
 @test "step 2: brew bundle is invoked when Brewfile exists" {
     setup_fake_backup
@@ -459,13 +504,6 @@ fake
 -----END OPENSSH PRIVATE KEY-----
 EOF
     echo 'ssh-rsa AAAA fake' > "$FAKE_BACKUP/config/ssh/id_rsa.pub"
-    # Real-bug workaround: restore.sh under set -e calls
-    #   chmod 644 "$HOME/.ssh/known_hosts" "$HOME/.ssh/config"
-    # unconditionally. If those files weren't restored, chmod returns 1
-    # and the script exits. Provide them in the backup so the chmod calls
-    # succeed.
-    : > "$FAKE_BACKUP/config/ssh/known_hosts"
-    : > "$FAKE_BACKUP/config/ssh/config"
     run_restore_yes "$FAKE_BACKUP"
     [ "$status" -eq 0 ]
     [ -d "$HOME/.ssh" ]

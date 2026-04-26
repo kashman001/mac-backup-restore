@@ -417,7 +417,7 @@ The restore strategy is: install everything possible through Homebrew (even apps
 
 **Step 1 — Directory Structure.** Creates the `~/Developer/` tree with `personal/`, `work/`, `oss/`, and `experiments/`. This is the "clean slate" layout that replaces the organic scatter of `~/code`, `~/projects`, `~/repos`, etc.
 
-**Step 2 — Homebrew.** Installs Homebrew if needed (including Apple Silicon PATH setup persisted to ~/.zprofile). Runs `brew bundle` on the original Brewfile first, then on the Brewfile.addon to convert previously manual installs to Homebrew casks. This is the key normalization step — apps that were .dmg downloads on the old Mac become Homebrew-managed on the new one, getting automatic updates via `brew upgrade`.
+**Step 2 — Homebrew.** Installs Homebrew if needed (including Apple Silicon PATH setup persisted to ~/.zprofile). Then a small **Bootstrap Essentials** sub-step installs `git`, `gh`, and `claude-code`, restores SSH keys and `~/.config/gh/hosts.yml` from the backup, and seeds `github.com` into `~/.ssh/known_hosts`. After this sub-step the user can `git clone`, `gh repo view`, and use `claude` even if the next step (the full Brewfile install) fails. Then runs `brew bundle` on the original Brewfile first, then on the Brewfile.addon to convert previously manual installs to Homebrew casks — the key normalization step where apps that were .dmg downloads on the old Mac become Homebrew-managed on the new one, getting automatic updates via `brew upgrade`. The SSH and gh-auth restorations in Steps 8 and 14 re-apply the same files (idempotent no-ops).
 
 **Step 3 — Mac App Store.** Installs `mas` CLI if needed, then reinstalls Mac App Store apps from the backup list. Apps like Final Cut Pro, Logic Pro, and Keynote come through here.
 
@@ -492,7 +492,7 @@ Each check is either a pass (green checkmark), fail (red X), or skip (blue info,
 
 ## Testing
 
-The toolkit ships with a [bats-core](https://github.com/bats-core/bats-core) test suite (231 tests across five files) that exercises every script and config file. Tests run under stock macOS `/bin/bash` (3.2.57) — the same shell the toolkit promises to support — so the harness validates that promise on every run.
+The toolkit ships with a [bats-core](https://github.com/bats-core/bats-core) test suite (236 tests across five files) that exercises every script and config file. Tests run under stock macOS `/bin/bash` (3.2.57) — the same shell the toolkit promises to support — so the harness validates that promise on every run.
 
 ### Running
 

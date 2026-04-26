@@ -174,6 +174,55 @@ else
     log "Homebrew already installed"
 fi
 
+# ── Bootstrap essentials ────────────────────────────────────────────────────
+# Install the smallest set of tools and the smallest slice of state that lets
+# the user fall back to git/gh/claude even if the full Brewfile install fails
+# in the next sub-step. All three calls are idempotent:
+#   - `brew install` on an already-installed package is a no-op.
+#   - SSH and gh-auth are restored again in Steps 8/14 (same files, same dest).
+echo ""
+info "Installing bootstrap essentials (git, gh, claude-code) before full Brewfile..."
+brew install git gh claude-code 2>&1 | tail -5 || \
+    warn "Some bootstrap essentials failed to install — full Brewfile may still fix them"
+
+# Restore SSH keys early so `git clone git@github.com:...` works immediately.
+# Each chmod is gated by `[ -e ] && ...` (set -e exempts the LHS-failing &&)
+# so a backup without known_hosts/config doesn't kill the script.
+SSH_BOOTSTRAP_SRC="$BACKUP/config/ssh"
+if [ -d "$SSH_BOOTSTRAP_SRC" ]; then
+    mkdir -p "$HOME/.ssh"
+    cp -a "$SSH_BOOTSTRAP_SRC/"* "$HOME/.ssh/" 2>/dev/null
+    chmod 700 "$HOME/.ssh"
+    chmod 600 "$HOME/.ssh/"* 2>/dev/null
+    chmod 644 "$HOME/.ssh/"*.pub 2>/dev/null
+    [ -e "$HOME/.ssh/known_hosts" ] && chmod 644 "$HOME/.ssh/known_hosts"
+    [ -e "$HOME/.ssh/config" ]      && chmod 644 "$HOME/.ssh/config"
+    log "SSH keys restored (bootstrap; full restore in Step 8)"
+fi
+
+# Seed github.com into known_hosts so the first `git clone` doesn't prompt
+# for fingerprint confirmation. No-op if it's already there.
+if has ssh-keyscan; then
+    mkdir -p "$HOME/.ssh"
+    touch "$HOME/.ssh/known_hosts"
+    if ! grep -q "^github.com " "$HOME/.ssh/known_hosts" 2>/dev/null; then
+        ssh-keyscan -t rsa,ecdsa,ed25519 github.com 2>/dev/null >> "$HOME/.ssh/known_hosts" \
+            && log "github.com added to ~/.ssh/known_hosts"
+    fi
+fi
+
+# Restore gh CLI auth early so `gh auth status` and `gh repo clone` work.
+GH_AUTH_BOOTSTRAP="$BACKUP/files/auth-tokens/gh/hosts.yml"
+if [ -f "$GH_AUTH_BOOTSTRAP" ]; then
+    mkdir -p "$HOME/.config/gh"
+    cp "$GH_AUTH_BOOTSTRAP" "$HOME/.config/gh/" 2>/dev/null
+    chmod 600 "$HOME/.config/gh/hosts.yml" 2>/dev/null
+    log "GitHub CLI auth restored (bootstrap; full restore in Step 14)"
+fi
+
+info "Essentials ready — git, gh, and claude work even if the Brewfile install fails next."
+echo ""
+
 # Install from the original Brewfile (things that were already in Brew)
 BREWFILE="$BACKUP/software-inventory/Brewfile"
 if [ -f "$BREWFILE" ]; then
@@ -378,8 +427,10 @@ if [ -d "$SSH_SRC" ] && [ "$(ls -A "$SSH_SRC")" ]; then
         chmod 700 "$HOME/.ssh"
         chmod 600 "$HOME/.ssh/"* 2>/dev/null
         chmod 644 "$HOME/.ssh/"*.pub 2>/dev/null
-        chmod 644 "$HOME/.ssh/known_hosts" 2>/dev/null
-        chmod 644 "$HOME/.ssh/config" 2>/dev/null
+        # `[ -e ] && chmod` (set -e exempts the LHS-failing &&) so a backup
+        # that doesn't include known_hosts/config doesn't kill the script.
+        [ -e "$HOME/.ssh/known_hosts" ] && chmod 644 "$HOME/.ssh/known_hosts"
+        [ -e "$HOME/.ssh/config" ]      && chmod 644 "$HOME/.ssh/config"
         log "SSH keys restored with correct permissions"
     }
 fi
