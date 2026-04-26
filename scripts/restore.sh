@@ -22,7 +22,18 @@
 # Usage: ./scripts/restore.sh /Volumes/MyDrive/mac-backup/20260415_120000
 # =============================================================================
 
-set -euo pipefail
+# Deliberately NOT `set -e`. A restore script does dozens of optional ops
+# (cp a maybe-missing dotfile, install an already-installed brew, pip-install
+# a package that needs Xcode CLT for a C extension, chmod a directory the
+# upstream backup didn't capture). Treating any single non-zero as fatal
+# means one app's broken backup sinks the whole multi-hour run — exactly the
+# foot-gun this script kept hitting (.zprofile dup, *.pub nullglob, empty
+# Zed dir, pip3 partial failure, …). Critical ops (brew install, brew
+# bundle) get explicit failure checks where it actually matters.
+#
+# `set -u` is kept to catch typo'd variable references; `pipefail` is kept
+# so we don't silently lose pipeline failures.
+set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
