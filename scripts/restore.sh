@@ -147,7 +147,7 @@ if [ -f "$BREWFILE" ]; then
     echo "    MAS apps: $(grep -c '^mas '  "$BREWFILE" 2>/dev/null || echo 0)"
     echo ""
     confirm "Install from original Brewfile?" && {
-        brew bundle --file="$BREWFILE" --no-lock 2>&1 | tail -10
+        brew bundle --file="$BREWFILE" 2>&1 | tail -10
         log "Original Brewfile packages installed"
     }
 fi
@@ -161,7 +161,7 @@ if [ -f "$BREWFILE_ADDON" ] && [ -s "$BREWFILE_ADDON" ]; then
     cat "$BREWFILE_ADDON" | sed 's/^/    /'
     echo ""
     confirm "Install these via Homebrew? (recommended — cleaner updates)" && {
-        brew bundle --file="$BREWFILE_ADDON" --no-lock 2>&1 | tail -10
+        brew bundle --file="$BREWFILE_ADDON" 2>&1 | tail -10
         log "Addon apps installed via Homebrew"
     }
 fi

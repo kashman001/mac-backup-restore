@@ -201,7 +201,7 @@ teardown() {
     run_restore_yes "$FAKE_BACKUP"
     [ "$status" -eq 0 ]
     mock_was_called brew
-    # The exact call form is: bundle --file=<backup>/software-inventory/Brewfile --no-lock
+    # The exact call form is: bundle --file=<backup>/software-inventory/Brewfile
     mock_calls brew | grep -q "bundle"
     mock_calls brew | grep -q "/software-inventory/Brewfile"
 }
