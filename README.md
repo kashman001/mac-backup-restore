@@ -44,6 +44,8 @@ Not all software migrates the same way. Installing the binary is only the first 
 
 The backup script generates a `migration-manifest.txt` that classifies every installed app into one of these patterns, so you know exactly what each app needs on the new Mac before you start the restore.
 
+**Pattern 1 covers app-internal cloud sync** (1Password, Microsoft 365, ChatGPT, VS Code Settings Sync, JetBrains Account, Chrome account sync, etc.) — handled via the `SIGN_IN_APPS` array in `config/migration-patterns.sh`. **macOS-level cloud sync is handled separately by Phase 5's cloud-sync detection** (see [Design Decisions](#design-decisions-and-best-practices)) — iCloud Drive, iCloud Photos, iCloud Music Library, and TV.app library are detected automatically and skipped by default since they re-sync from iCloud on the new Mac.
+
 ---
 
 ## Architecture
@@ -204,7 +206,7 @@ When you run backup.sh, it creates a timestamped directory on the external drive
 
 The key addition compared to a typical backup tool is the `install-sources.txt` classification file and `Brewfile.addon`. The backup scans every app in /Applications, auto-discovers how it was installed (Homebrew cask, Mac App Store, manual download, macOS-bundled) by checking MAS receipts, querying `brew info`, and scanning /System/Applications. For manual installs, it checks if a Homebrew cask exists and generates an addon Brewfile so the restore can install them cleanly via Homebrew even though they were originally .dmg downloads.
 
-The `_data-classification.txt` file in `files/` categorizes every data directory by type: cloud-synced (will re-sync via iCloud), documents (personal and work files), archival (large old data like Zoom recordings), app-data (created by specific apps, only useful if the app is installed), media (photos, videos), and stale (multi-machine sync artifacts from old devices). The restore script uses this classification to guide decisions — stale data is flagged for skipping, archival data is flagged for cloud/external storage, and app-data is flagged as conditional on the app being installed.
+The `_data-classification.txt` file in `files/` categorizes every data directory by type: `CLOUD-SYNCED` (managed by iCloud — Photos Library, Music library, Documents/Desktop sync, etc.; re-syncs on the new Mac), `DOCUMENTS` (personal and work files), `ARCHIVAL` (large old data like Zoom recordings), `APP-DATA` (created by specific apps, only useful if the app is installed), `MEDIA` (photos, videos), and `STALE` (multi-machine sync artifacts from old devices). The restore script uses this classification to guide decisions — `CLOUD-SYNCED` data is skipped by default (iCloud re-syncs it on sign-in), stale data is flagged for skipping, archival data is flagged for cloud/external storage, and app-data is flagged as conditional on the app being installed.
 
 Each directory is self-contained and independently useful — you could restore just your dotfiles or just your Brewfile without touching anything else.
 
@@ -290,6 +292,8 @@ Cloud-native data (anything in iCloud, OneDrive, 1Password) will re-sync when yo
 **Organic-to-clean migration.** The backup script assumes your current Mac is an adhoc setup — apps installed through a mix of methods, code scattered across multiple directories, configs accumulated over years. It scans everywhere and classifies what it finds. The restore script then normalizes everything: Homebrew for all apps, ~/Developer/ for all code, proper permissions on all keys. You go from organic to organized without losing anything.
 
 **Brew-first install strategy.** The backup classifies every app in /Applications by install source — auto-detecting bundled apps from /System/Applications, MAS apps from receipt directories, and discovering Homebrew cask names via `brew info` (with a user-editable `config/cask-map.sh` for overrides). It generates a Brewfile.addon for apps that were manually installed but have Homebrew casks available. On the new Mac, these get installed through Homebrew instead of manual downloads. This means `brew upgrade` keeps everything updated going forward — no more hunting for .dmg update dialogs.
+
+**macOS-level cloud sync detection.** Phase 5 of `backup.sh` detects directories that macOS already syncs via iCloud and skips them by default — Documents/Desktop under iCloud Drive sync, Photos Library under iCloud Photos, Apple Music's library, and TV.app's library. Detection is per-subdirectory (whole-dir via xattr, sub-dir via the app's iCloud sync flag); per-file stub detection is intentionally avoided for performance. The user can override per-prompt during backup ("Back up anyway?") if they want offline copies. On restore, cloud-synced items are skipped silently with an advisory pointing to `MBR_RESTORE_CLOUD=1` for users who want to copy from the backup drive instead of waiting for iCloud to re-sync. The detection lists are configurable in `config/migration-patterns.sh` (`CLOUD_TOP_DIRS`, `CLOUD_SUBDIRS`).
 
 **Project discovery by .git directory.** Rather than requiring you to maintain a list of project paths, the backup script scans the entire home directory up to 5 levels deep looking for `.git` directories, excluding Library, Trash, and dependency directories. This catches everything regardless of where you happened to clone it. It also scans for orphan code files (scripts, notebooks) that aren't inside any git repo.
 
@@ -429,6 +433,17 @@ The restore strategy is: install everything possible through Homebrew (even apps
 **Step 16 — System Config.** Restores crontab and Launch Agents.
 
 Finishes with a structured summary organized by migration pattern: what was handled automatically, which apps need account sign-in (Pattern 1), which need manual verification (Pattern 3 license apps), and a pointer to the migration manifest for the full picture.
+
+### Cloud-synced data on restore
+
+Directories the backup classified as `CLOUD-SYNCED` (Documents/Desktop with iCloud sync, Photos Library, Apple Music library, TV.app library) are skipped by default during Step 14. This is intentional — iCloud will re-sync them automatically once you sign in. The restore script prints an advisory listing each skipped item.
+
+If you want to restore from the backup drive instead (e.g. you don't trust iCloud, or your data was offloaded to stubs and you want the local copy that was captured), set the env var:
+
+```bash
+MBR_RESTORE_CLOUD=1 bash /Volumes/YourDrive/mac-backup-restore/scripts/restore.sh \
+    /Volumes/YourDrive/mac-backup/<TIMESTAMP>
+```
 
 ---
 
