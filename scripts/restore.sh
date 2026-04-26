@@ -147,8 +147,13 @@ if [ -f "$BREWFILE" ]; then
     echo "    MAS apps: $(grep -c '^mas '  "$BREWFILE" 2>/dev/null || echo 0)"
     echo ""
     confirm "Install from original Brewfile?" && {
-        brew bundle --file="$BREWFILE" 2>&1 | tail -10
-        log "Original Brewfile packages installed"
+        if brew bundle --file="$BREWFILE"; then
+            log "Original Brewfile packages installed"
+        else
+            warn "brew bundle reported unsatisfied dependencies (see output above)"
+            warn "Continuing with restore — handle them and re-run brew bundle later"
+            echo "  - Re-run: brew bundle install --file=\"$BREWFILE\"" >> "$MANUAL_TODO"
+        fi
     }
 fi
 
@@ -161,8 +166,13 @@ if [ -f "$BREWFILE_ADDON" ] && [ -s "$BREWFILE_ADDON" ]; then
     cat "$BREWFILE_ADDON" | sed 's/^/    /'
     echo ""
     confirm "Install these via Homebrew? (recommended — cleaner updates)" && {
-        brew bundle --file="$BREWFILE_ADDON" 2>&1 | tail -10
-        log "Addon apps installed via Homebrew"
+        if brew bundle --file="$BREWFILE_ADDON"; then
+            log "Addon apps installed via Homebrew"
+        else
+            warn "brew bundle reported unsatisfied addon dependencies (see output above)"
+            warn "Continuing with restore — handle them and re-run brew bundle later"
+            echo "  - Re-run: brew bundle install --file=\"$BREWFILE_ADDON\"" >> "$MANUAL_TODO"
+        fi
     }
 fi
 

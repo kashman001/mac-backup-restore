@@ -206,6 +206,24 @@ teardown() {
     mock_calls brew | grep -q "/software-inventory/Brewfile"
 }
 
+@test "step 2: brew bundle failure does NOT abort the restore" {
+    setup_fake_backup
+    # Make `brew bundle ...` exit non-zero, but keep `brew` itself usable for
+    # `has brew` and any other invocation.
+    mock_command_script brew <<'EOF'
+if [ "${1:-}" = "bundle" ]; then
+    echo "fake: brew bundle dependencies failed" >&2
+    exit 1
+fi
+exit 0
+EOF
+    run_restore_yes "$FAKE_BACKUP"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"unsatisfied dependencies"* ]]
+    # Script must reach a later phase, proving it didn't exit at step 2.
+    [[ "$output" == *"Mac App Store"* ]]
+}
+
 @test "step 2: Homebrew install path NOT taken when brew is on PATH" {
     setup_fake_backup
     # The default mock for brew is present, so `has brew` returns true.
