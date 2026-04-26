@@ -526,6 +526,54 @@ EOF
     [ ! -f "$bd/config/dot-config/myapp/logs/old.log" ]
 }
 
+@test "phase 2: oh-my-zsh manifest captures git remote of custom plugin" {
+    # Build a fake ~/.oh-my-zsh/custom/plugins/myplugin/ with a .git dir, and
+    # mock `git -C dir remote get-url origin` to return a fake URL.
+    mkdir -p "$FAKE_HOME/.oh-my-zsh/custom/plugins/myplugin/.git"
+    mock_command_script git <<'EOF'
+if [ "$1" = "-C" ] && [ "$3" = "remote" ] && [ "$4" = "get-url" ]; then
+    echo "https://github.com/example/myplugin.git"
+    exit 0
+fi
+exit 0
+EOF
+    run_backup_yes
+    [ "$status" -eq 0 ]
+    bd=$(backup_dir)
+    [ -f "$bd/config/oh-my-zsh/manifest.txt" ]
+    grep -q "^plugins|myplugin|https://github.com/example/myplugin.git$" \
+        "$bd/config/oh-my-zsh/manifest.txt"
+}
+
+@test "phase 2: oh-my-zsh non-git custom files are copied verbatim" {
+    mkdir -p "$FAKE_HOME/.oh-my-zsh/custom"
+    echo 'alias gs="git status"' > "$FAKE_HOME/.oh-my-zsh/custom/aliases.zsh"
+    run_backup_yes
+    [ "$status" -eq 0 ]
+    bd=$(backup_dir)
+    [ -f "$bd/config/oh-my-zsh/custom/aliases.zsh" ]
+    grep -q 'alias gs' "$bd/config/oh-my-zsh/custom/aliases.zsh"
+}
+
+@test "phase 2: oh-my-zsh skips the OMZ-shipped 'example' plugin and theme" {
+    mkdir -p "$FAKE_HOME/.oh-my-zsh/custom/plugins/example"
+    echo 'fake' > "$FAKE_HOME/.oh-my-zsh/custom/example.zsh-theme"
+    run_backup_yes
+    [ "$status" -eq 0 ]
+    bd=$(backup_dir)
+    # The example plugin and theme should NOT appear in the loose-files mirror.
+    [ ! -d "$bd/config/oh-my-zsh/custom/plugins/example" ]
+    [ ! -f "$bd/config/oh-my-zsh/custom/example.zsh-theme" ]
+}
+
+@test "phase 2: no oh-my-zsh dir means no oh-my-zsh capture (graceful)" {
+    # Default fake home has no .oh-my-zsh — the block must be skipped silently.
+    run_backup_yes
+    [ "$status" -eq 0 ]
+    bd=$(backup_dir)
+    [ ! -d "$bd/config/oh-my-zsh" ]
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Phase 3 — App settings & licenses
 # ─────────────────────────────────────────────────────────────────────────────

@@ -447,6 +447,53 @@ if [ -d "$DOTFILES_SRC" ]; then
     }
 fi
 
+# oh-my-zsh customizations
+# Installs oh-my-zsh unattended if absent (KEEP_ZSHRC keeps the .zshrc we just
+# restored above; --skip-chsh avoids prompting for the shell change), then
+# re-clones any git-managed plugins/themes from the backup manifest and
+# rsyncs loose customizations (aliases.zsh, custom themes, etc.).
+OMZ_SRC="$BACKUP/config/oh-my-zsh"
+OMZ_HAS_MANIFEST=0
+OMZ_HAS_LOOSE=0
+[ -f "$OMZ_SRC/manifest.txt" ] && [ -s "$OMZ_SRC/manifest.txt" ] && OMZ_HAS_MANIFEST=1
+[ -d "$OMZ_SRC/custom" ] && [ -n "$(ls -A "$OMZ_SRC/custom" 2>/dev/null)" ] && OMZ_HAS_LOOSE=1
+if [ "$OMZ_HAS_MANIFEST" = 1 ] || [ "$OMZ_HAS_LOOSE" = 1 ]; then
+    info "oh-my-zsh customizations from backup detected"
+    [ "$OMZ_HAS_MANIFEST" = 1 ] && \
+        info "  $(wc -l < "$OMZ_SRC/manifest.txt" | tr -d ' ') git-managed plugin(s)/theme(s) to re-clone"
+    confirm "Restore oh-my-zsh and customizations?" && {
+        if [ ! -d "$HOME/.oh-my-zsh" ]; then
+            info "Installing oh-my-zsh (unattended, keeps existing .zshrc)..."
+            RUNZSH=no KEEP_ZSHRC=yes \
+                sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended --keep-zshrc \
+                >/dev/null 2>&1 \
+                && log "oh-my-zsh installed" \
+                || warn "oh-my-zsh install script failed — manual install may be needed"
+        else
+            log "oh-my-zsh already installed"
+        fi
+
+        if [ "$OMZ_HAS_MANIFEST" = 1 ] && [ -d "$HOME/.oh-my-zsh" ]; then
+            while IFS='|' read -r kind name url; do
+                [ -n "$kind" ] && [ -n "$name" ] && [ -n "$url" ] || continue
+                dest="$HOME/.oh-my-zsh/custom/$kind/$name"
+                if [ -d "$dest" ]; then
+                    log "  $kind/$name already present"
+                else
+                    git clone --depth=1 "$url" "$dest" 2>/dev/null \
+                        && log "  cloned $kind/$name" \
+                        || warn "  failed to clone $kind/$name from $url"
+                fi
+            done < "$OMZ_SRC/manifest.txt"
+        fi
+
+        if [ "$OMZ_HAS_LOOSE" = 1 ] && [ -d "$HOME/.oh-my-zsh" ]; then
+            rsync -a "$OMZ_SRC/custom/" "$HOME/.oh-my-zsh/custom/" 2>/dev/null
+            log "Loose oh-my-zsh customizations restored"
+        fi
+    }
+fi
+
 # SSH keys
 SSH_SRC="$BACKUP/config/ssh"
 if [ -d "$SSH_SRC" ] && [ "$(ls -A "$SSH_SRC")" ]; then

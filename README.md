@@ -363,7 +363,7 @@ The script assumes an organic, adhoc setup — software installed through a mix 
 
 **Phase 1 — Software Inventory.** Generates a Brewfile via `brew bundle dump`. Lists all apps in /Applications, then classifies each one by install source (Homebrew cask, Mac App Store, manual download, macOS-bundled). For apps not in the user's `config/cask-map.sh`, the script auto-discovers cask names by querying `brew info`. For manual installs with a known cask, it generates a `Brewfile.addon` — this is what lets the restore convert manual installs to Homebrew. Bundled apps are auto-detected from /System/Applications and MAS apps from receipt directories. Also captures /usr/local/bin (standalone tools), package lists from npm, pip3, pipx, cargo, gem, Go, and extension lists from VS Code and Cursor. Scans browser extensions across Chrome, Arc, Opera, and Safari by parsing Chromium manifest.json files to extract human-readable names and versions. Captures application plugins from all JetBrains IDEs (not just PyCharm) and Obsidian community plugins per vault. Exports Anaconda/conda environments as YAML files for recreation on the new Mac. Scans Steam for installed games (parsing appmanifest .acf files) and CrossOver game launchers (parsing Desktop .app bundles that call `steam://run/`).
 
-**Phase 2 — Dotfiles & Config.** Instead of only copying a hardcoded list, it first grabs known priority dotfiles, then scans `~/` for any additional dotfiles it didn't predict. This catches organic configs that accumulate over time. Also backs up SSH, GPG, ~/.config, and cloud credentials (AWS, Kubernetes, Docker).
+**Phase 2 — Dotfiles & Config.** Instead of only copying a hardcoded list, it first grabs known priority dotfiles, then scans `~/` for any additional dotfiles it didn't predict. This catches organic configs that accumulate over time. Also backs up SSH, GPG, ~/.config, cloud credentials (AWS, Kubernetes, Docker), and **oh-my-zsh customizations**. For oh-my-zsh, the toolkit captures a manifest of git-cloned plugins/themes (`kind|name|remote_url` so they can be re-cloned on restore) plus any loose custom files (aliases.zsh, single-file themes, etc.) — without copying the OMZ core checkout itself, which is better re-installed fresh.
 
 **Phase 3 — Application Settings & Licenses.** Copies settings for all apps listed in `config/app-settings.sh`, automatically finding the latest JetBrains IDE version directories. Exports the full macOS defaults database. Backs up license plists for apps listed in `config/license-plists.sh`. Generates a migration manifest that dynamically classifies every installed app by migration pattern — CONFIG and LICENSE-KEY apps are auto-detected from what was actually backed up, SIGN-IN apps come from `config/migration-patterns.sh`. Optionally backs up CrossOver bottles (which can be tens of gigabytes if you have Windows games installed).
 
@@ -431,7 +431,7 @@ The restore strategy is: install everything possible through Homebrew (even apps
 
 **Step 7 — Steam & Games.** Lists native macOS Steam games and CrossOver/Steam Windows games from the backup. Optionally restores CrossOver bottles (saves re-downloading game data). Provides steam:// install links for quick redownload.
 
-**Step 8 — Dotfiles & Config.** Restores dotfiles with `.pre-restore` safety backups, SSH keys with hardened permissions, GPG keys, ~/.config, and cloud credentials (AWS, Kubernetes, Docker).
+**Step 8 — Dotfiles & Config.** Restores dotfiles with `.pre-restore` safety backups, then re-installs **oh-my-zsh** if the backup contains it (unattended install with `KEEP_ZSHRC=yes` so the just-restored .zshrc is left alone), re-clones each plugin/theme from the captured manifest, and rsyncs any loose custom files. Then restores SSH keys with hardened permissions, GPG keys, ~/.config, and cloud credentials (AWS, Kubernetes, Docker).
 
 **Step 9 — Application Settings.** Restores settings for all apps defined in `config/app-settings.sh`, including JetBrains IDE settings (auto-finds the latest version directory). Installs VS Code and Cursor extensions in parallel from the backed-up extension lists.
 
@@ -494,7 +494,7 @@ Each check is either a pass (green checkmark), fail (red X), or skip (blue info,
 
 ## Testing
 
-The toolkit ships with a [bats-core](https://github.com/bats-core/bats-core) test suite (244 tests across five files) that exercises every script and config file. Tests run under stock macOS `/bin/bash` (3.2.57) — the same shell the toolkit promises to support — so the harness validates that promise on every run.
+The toolkit ships with a [bats-core](https://github.com/bats-core/bats-core) test suite (251 tests across five files) that exercises every script and config file. Tests run under stock macOS `/bin/bash` (3.2.57) — the same shell the toolkit promises to support — so the harness validates that promise on every run.
 
 ### Running
 

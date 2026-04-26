@@ -510,6 +510,43 @@ EOF
     grep -q "new" "$HOME/.zshrc"
 }
 
+@test "step 8 oh-my-zsh: git clone is invoked for each manifest entry" {
+    setup_fake_backup
+    mkdir -p "$FAKE_BACKUP/config/oh-my-zsh"
+    cat > "$FAKE_BACKUP/config/oh-my-zsh/manifest.txt" <<'EOF'
+plugins|zsh-autosuggestions|https://github.com/zsh-users/zsh-autosuggestions.git
+themes|powerlevel10k|https://github.com/romkatv/powerlevel10k.git
+EOF
+    # Create a fake .oh-my-zsh dir so the curl-installer path is skipped.
+    mkdir -p "$HOME/.oh-my-zsh/custom/plugins" "$HOME/.oh-my-zsh/custom/themes"
+    run_restore_yes "$FAKE_BACKUP"
+    [ "$status" -eq 0 ]
+    mock_calls git | grep -q "clone --depth=1 https://github.com/zsh-users/zsh-autosuggestions.git"
+    mock_calls git | grep -q "clone --depth=1 https://github.com/romkatv/powerlevel10k.git"
+}
+
+@test "step 8 oh-my-zsh: loose customizations are rsync'd into ~/.oh-my-zsh/custom/" {
+    setup_fake_backup
+    mkdir -p "$FAKE_BACKUP/config/oh-my-zsh/custom"
+    echo 'alias ll="ls -la"' > "$FAKE_BACKUP/config/oh-my-zsh/custom/aliases.zsh"
+    mkdir -p "$HOME/.oh-my-zsh/custom"
+    run_restore_yes "$FAKE_BACKUP"
+    [ "$status" -eq 0 ]
+    # rsync is a default mock (no real copy happens). Assert it was invoked
+    # with the correct source → dest pair for the oh-my-zsh loose-files step.
+    mock_calls rsync \
+        | grep -q "$FAKE_BACKUP/config/oh-my-zsh/custom/ $HOME/.oh-my-zsh/custom/"
+    [[ "$output" == *"Loose oh-my-zsh customizations restored"* ]]
+}
+
+@test "step 8 oh-my-zsh: backup with no oh-my-zsh data does NOT prompt or fail" {
+    setup_fake_backup
+    # Default fake backup has no config/oh-my-zsh — block must stay silent.
+    run_restore_yes "$FAKE_BACKUP"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"oh-my-zsh customizations from backup"* ]]
+}
+
 @test "step 8: ssh keys restored with 700/600/644 permissions" {
     setup_fake_backup
     mkdir -p "$FAKE_BACKUP/config/ssh"

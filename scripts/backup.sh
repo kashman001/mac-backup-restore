@@ -529,6 +529,48 @@ if [ -d "$HOME/.config" ]; then
     log "~/.config ($(du -sh "$CFG/dot-config" 2>/dev/null | cut -f1))"
 fi
 
+# oh-my-zsh customizations
+# Strategy: don't blindly copy ~/.oh-my-zsh/ (it's a git checkout that's better
+# re-installed fresh). Instead, capture (a) a manifest of git-cloned
+# plugins/themes under custom/ so we can re-clone them at restore, and (b) any
+# loose user files (aliases.zsh, custom non-git themes, etc.). The OMZ-shipped
+# `example/` plugin and `example.zsh-theme` are skipped — fresh install
+# provides them.
+if [ -d "$HOME/.oh-my-zsh" ]; then
+    OMZ_DST="$CFG/oh-my-zsh"
+    mkdir -p "$OMZ_DST"
+    OMZ_MANIFEST="$OMZ_DST/manifest.txt"
+    > "$OMZ_MANIFEST"
+
+    for kind in plugins themes; do
+        for d in "$HOME/.oh-my-zsh/custom/$kind"/*/; do
+            [ -d "$d" ] || continue
+            name=$(basename "$d")
+            [ "$name" = "example" ] && continue
+            if [ -d "$d/.git" ] && has git; then
+                url=$(git -C "$d" remote get-url origin 2>/dev/null || true)
+                [ -n "$url" ] && echo "$kind|$name|$url" >> "$OMZ_MANIFEST"
+            fi
+        done
+    done
+
+    # Copy everything under custom/ except the .git dirs and OMZ-shipped
+    # examples; then strip out subdirs we already captured in the manifest
+    # (they'll be re-cloned, no need to ship the working copy).
+    OMZ_LOOSE="$OMZ_DST/custom"
+    mkdir -p "$OMZ_LOOSE"
+    rsync -a --exclude='.git' \
+          --exclude='example/' --exclude='example.zsh' \
+          --exclude='example.zsh-theme' \
+          "$HOME/.oh-my-zsh/custom/" "$OMZ_LOOSE/" 2>/dev/null
+    while IFS='|' read -r kind name url; do
+        [ -n "$kind" ] && [ -n "$name" ] && rm -rf "$OMZ_LOOSE/$kind/$name"
+    done < "$OMZ_MANIFEST"
+
+    OMZ_COUNT=$(wc -l < "$OMZ_MANIFEST" | tr -d ' ')
+    log "oh-my-zsh ($OMZ_COUNT git-managed plugins/themes captured)"
+fi
+
 # Cloud/infra credentials
 for cred_dir in .aws .kube .docker; do
     if [ -d "$HOME/$cred_dir" ]; then
