@@ -737,11 +737,18 @@ if [ -d "$FILES_SRC" ]; then
         case "$name" in
             Screenshots|scattered-credentials|auth-tokens) continue ;;
         esac
+        # Skip items the backup classified as CLOUD-SYNCED unless user opted in.
+        if [ -f "$DATA_CLASS" ] \
+           && [ "${MBR_RESTORE_CLOUD:-}" != "1" ] \
+           && grep -q "^CLOUD-SYNCED.*${name}/" "$DATA_CLASS" 2>/dev/null; then
+            info "  ☁ skipping $name — cloud-synced (re-syncs from iCloud)"
+            continue
+        fi
         SIZE=$(du -sh "$dir" 2>/dev/null | cut -f1)
 
         # Special handling for Documents — warn about stale/archival subdirs
         if [ "$name" = "Documents" ] && [ -f "$DATA_CLASS" ]; then
-            HAS_STALE=$(grep "^STALE\|^ARCHIVAL" "$DATA_CLASS" 2>/dev/null | head -1)
+            HAS_STALE=$(grep "^STALE\|^ARCHIVAL" "$DATA_CLASS" 2>/dev/null | head -1 || true)
             if [ -n "$HAS_STALE" ]; then
                 warn "Documents ($SIZE) contains stale/archival data (see classification above)"
                 confirm "Restore Documents? (you can skip stale subdirs after)" && {

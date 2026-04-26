@@ -791,3 +791,41 @@ EOF
     [[ "$output" == *"Documents/"* ]]
     [[ "$output" == *"Photos Library.photoslibrary"* ]]
 }
+
+@test "step 14: CLOUD-SYNCED dirs skipped by default" {
+    setup_fake_backup
+    mkdir -p "$FAKE_BACKUP/files/Documents"
+    echo "doc-content" > "$FAKE_BACKUP/files/Documents/note.txt"
+    cat >> "$FAKE_BACKUP/files/_data-classification.txt" <<'EOF'
+CLOUD-SYNCED   | Documents/ | 15G | iCloud Desktop & Documents — re-syncs on new Mac
+EOF
+    # Capture rsync calls.
+    mock_command_script rsync <<'EOF'
+echo "$@" >> "$MOCK_BIN/rsync.calls"
+exit 0
+EOF
+    run_restore_yes "$FAKE_BACKUP"
+    [ "$status" -eq 0 ]
+    # rsync should NOT have been called for Documents.
+    ! grep -q "files/Documents" "$MOCK_BIN/rsync.calls"
+    [[ "$output" == *"skipping Documents"* ]] || [[ "$output" == *"Documents.*cloud-synced"* ]]
+}
+
+@test "step 14: CLOUD-SYNCED dirs ARE restored when MBR_RESTORE_CLOUD=1" {
+    setup_fake_backup
+    mkdir -p "$FAKE_BACKUP/files/Documents"
+    echo "doc-content" > "$FAKE_BACKUP/files/Documents/note.txt"
+    cat >> "$FAKE_BACKUP/files/_data-classification.txt" <<'EOF'
+CLOUD-SYNCED   | Documents/ | 15G | iCloud Desktop & Documents — re-syncs on new Mac
+EOF
+    mock_command_script rsync <<'EOF'
+echo "$@" >> "$MOCK_BIN/rsync.calls"
+exit 0
+EOF
+    # Run with the env var set.
+    output=$(printf 'y%.0s' $(seq 1 400) | \
+        MBR_RESTORE_CLOUD=1 /bin/bash "$SCRIPTS_DIR/restore.sh" "$FAKE_BACKUP" 2>&1)
+    status=$?
+    [ "$status" -eq 0 ]
+    grep -q "files/Documents" "$MOCK_BIN/rsync.calls"
+}
