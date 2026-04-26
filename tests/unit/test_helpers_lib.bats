@@ -224,8 +224,9 @@ setup() {
 @test "is_icloud_drive_synced: false on a plain directory" {
     setup_test_env
     mkdir -p "$FAKE_HOME/plain"
-    # Don't install an xattr mock — the helper must hit real xattr,
-    # which returns empty on a plain dir → grep no-match → return 1.
+    # Don't install an xattr mock — the helper hits the real `xattr`, which
+    # exits non-zero on a missing key (stderr suppressed by 2>/dev/null), and
+    # its empty stdout makes `grep -q` exit 1, so the helper returns 1.
     ! is_icloud_drive_synced "$FAKE_HOME/plain"
     teardown_test_env
 }
