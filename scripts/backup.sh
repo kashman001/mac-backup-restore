@@ -1109,10 +1109,51 @@ if [ "${#CLOUD_DETECTED[@]}" -gt 0 ]; then
     echo ""
 fi
 
+# Helper: is this dir's name in CLOUD_DETECTED with kind=TOP?
+_dir_is_cloud_top() {
+    local q="$1" entry kind name
+    [ "${#CLOUD_DETECTED[@]}" -gt 0 ] || return 1
+    for entry in "${CLOUD_DETECTED[@]}"; do
+        kind="${entry%%|*}"; name=$(echo "${entry#*|}" | awk -F'|' '{print $1}')
+        [ "$kind" = "TOP" ] && [ "$name" = "$q" ] && return 0
+    done
+    return 1
+}
+
+# Helper: print rsync --exclude flags for any cloud SUB entries matching this parent.
+_cloud_excludes_for() {
+    local parent="$1" entry kind p sp rest rest2
+    [ "${#CLOUD_DETECTED[@]}" -gt 0 ] || return 0
+    for entry in "${CLOUD_DETECTED[@]}"; do
+        kind="${entry%%|*}"; rest="${entry#*|}"
+        [ "$kind" = "SUB" ] || continue
+        p="${rest%%|*}"; rest2="${rest#*|}"
+        sp="${rest2%%|*}"
+        [ "$p" = "$parent" ] && printf -- "--exclude=%s\n" "$sp"
+    done
+}
+
 for dir in "$HOME/Documents" "$HOME/Desktop" "$HOME/Downloads" "$HOME/Pictures" "$HOME/Music" "$HOME/Movies"; do
     name=$(basename "$dir")
     [ -d "$dir" ] && [ "$(ls -A "$dir" 2>/dev/null)" ] || continue
     SIZE=$(du -sh "$dir" 2>/dev/null | cut -f1)
+
+    if _dir_is_cloud_top "$name"; then
+        # Branch 1: whole dir is iCloud-managed; default-skip with inverted prompt.
+        warn "☁ $name — iCloud Desktop & Documents sync is enabled"
+        info "  Files in this folder live in iCloud and re-sync automatically on the"
+        info "  new Mac when you sign in. Local-only files (if any) are NOT in iCloud."
+        echo "CLOUD-SYNCED   | $name/ | $SIZE | iCloud Desktop & Documents — re-syncs on new Mac" >> "$DATA_CLASS"
+        confirm "Back up anyway as offline insurance?" && {
+            rsync -a --progress \
+                --exclude='.DS_Store' \
+                --exclude='workspace/.metadata' \
+                "$dir/" "$FILES/$name/" 2>/dev/null
+            log "$name (overridden — offline copy captured)"
+        }
+        continue
+    fi
+
     confirm "Back up $name ($SIZE on disk)?" && {
         rsync -a --progress \
             --exclude='.DS_Store' \

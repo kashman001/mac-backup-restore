@@ -66,6 +66,17 @@ no_input() {
     done
 }
 
+# One 'y' (accepts "Start backup?") then 599 'n' chars (declines all subsequent
+# prompts, including the inverted "Back up anyway as offline insurance?" prompt).
+y_then_n_input() {
+    printf 'y'
+    local i=0
+    while [ $i -lt 599 ]; do
+        printf 'n'
+        i=$((i + 1))
+    done
+}
+
 # Run backup.sh end-to-end with the given stdin. Sets $output/$status as bats
 # `run` does. We can't use bats `run` directly because we need stdin redirect.
 run_backup_yes() {
@@ -75,6 +86,14 @@ run_backup_yes() {
 
 run_backup_no() {
     output=$(no_input | bash "$SCRIPTS_DIR/backup.sh" "$FAKE_DRIVE" 2>&1)
+    status=$?
+}
+
+# Accept "Start backup?" (y) then decline all subsequent prompts (n).
+# Used to test Branch 1 default-skip behaviour without also refusing the
+# initial prompt and exiting before Phase 5 is even reached.
+run_backup_y_then_n() {
+    output=$(y_then_n_input | bash "$SCRIPTS_DIR/backup.sh" "$FAKE_DRIVE" 2>&1)
     status=$?
 }
 
@@ -924,4 +943,30 @@ EOF
     run_backup_yes
     [ "$status" -eq 0 ]
     [[ "$output" != *"Cloud-sync summary"* ]]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 5 — Branch 1: whole-dir iCloud skip with inverted prompt
+# ─────────────────────────────────────────────────────────────────────────────
+
+@test "phase 5: iCloud-managed Documents is skipped by default" {
+    prep_required_home_dirs
+    make_fake_icloud_dir "$FAKE_HOME/Documents"
+    echo "personal-doc" > "$FAKE_HOME/Documents/note.txt"
+    run_backup_y_then_n  # y→Start backup, n→skip the inverted "Back up anyway?" prompt
+    [ "$status" -eq 0 ]
+    bd=$(backup_dir)
+    [ ! -d "$bd/files/Documents" ]
+    grep -q '^CLOUD-SYNCED.*Documents/' "$bd/files/_data-classification.txt"
+}
+
+@test "phase 5: iCloud-managed Documents is backed up on 'y' override" {
+    prep_required_home_dirs
+    make_fake_icloud_dir "$FAKE_HOME/Documents"
+    echo "personal-doc" > "$FAKE_HOME/Documents/note.txt"
+    run_backup_yes  # 'y' to inverted prompt → back up
+    [ "$status" -eq 0 ]
+    bd=$(backup_dir)
+    [ -d "$bd/files/Documents" ]
+    [ -f "$bd/files/Documents/note.txt" ]
 }
