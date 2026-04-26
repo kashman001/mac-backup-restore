@@ -240,10 +240,17 @@ teardown() {
 
 # ── is_icloud_photos_enabled() ─────────────────────────────────────────────
 
-@test "is_icloud_photos_enabled: true when cloudphotod has CPLEngineParameters-SystemLibrary" {
+@test "is_icloud_photos_enabled: true via file-system signal (cpl/ dir exists)" {
+    mkdir -p "$FAKE_HOME/Pictures/Photos Library.photoslibrary/resources/cpl"
+    # No defaults mock — we should not need it; the fs check returns first.
+    is_icloud_photos_enabled
+}
+
+@test "is_icloud_photos_enabled: true via daemon signal (cpl/ absent, defaults succeeds)" {
+    # cpl/ dir does NOT exist → fall through to defaults check.
     mock_command_script defaults <<'EOF'
 if [ "$1" = "read" ] && [ "$2" = "com.apple.cloudphotod" ] && [ "$3" = "CPLEngineParameters-SystemLibrary" ]; then
-    echo "{ clientLibraryBasePath = \"/fake/Photos Library.photoslibrary/resources/cpl/cloudsync.noindex\"; }"
+    echo "stub-non-empty"
     exit 0
 fi
 exit 1
@@ -251,21 +258,16 @@ EOF
     is_icloud_photos_enabled
 }
 
-@test "is_icloud_photos_enabled: false when cloudphotod key is absent" {
+@test "is_icloud_photos_enabled: false when neither signal present" {
+    # No fs marker, no defaults mock (defaults not in mock_bin → real defaults
+    # against fake $HOME has no cloudphotod prefs → exits non-zero).
     mock_command_failing defaults
-    ! is_icloud_photos_enabled
-}
-
-@test "is_icloud_photos_enabled: false when defaults read exits non-zero" {
-    mock_command_script defaults <<'EOF'
-exit 1
-EOF
     ! is_icloud_photos_enabled
 }
 
 # ── is_icloud_music_enabled() ──────────────────────────────────────────────
 
-@test "is_icloud_music_enabled: true when SubscriptionAvailability is 1" {
+@test "is_icloud_music_enabled: true via SubscriptionAvailability=1" {
     mock_command_script defaults <<'EOF'
 if [ "$1" = "read" ] && [ "$2" = "com.apple.Music" ] && [ "$3" = "_MPCloudServiceStatusControllerSubscriptionAvailability" ]; then
     echo "1"
@@ -276,18 +278,18 @@ EOF
     is_icloud_music_enabled
 }
 
-@test "is_icloud_music_enabled: false when SubscriptionAvailability is 0" {
+@test "is_icloud_music_enabled: true via doesStoreSupportCloudMusicLibrary=1 (fallback)" {
     mock_command_script defaults <<'EOF'
-if [ "$1" = "read" ] && [ "$2" = "com.apple.Music" ] && [ "$3" = "_MPCloudServiceStatusControllerSubscriptionAvailability" ]; then
-    echo "0"
-    exit 0
-fi
-exit 1
+case "$3" in
+    _MPCloudServiceStatusControllerSubscriptionAvailability) exit 1 ;;
+    doesStoreSupportCloudMusicLibrary) echo "1"; exit 0 ;;
+    *) exit 1 ;;
+esac
 EOF
-    ! is_icloud_music_enabled
+    is_icloud_music_enabled
 }
 
-@test "is_icloud_music_enabled: false when defaults read fails" {
+@test "is_icloud_music_enabled: false when both signals absent" {
     mock_command_failing defaults
     ! is_icloud_music_enabled
 }

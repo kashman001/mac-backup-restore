@@ -68,25 +68,33 @@ is_icloud_drive_synced() {
 }
 
 # Returns 0 if iCloud Photos sync is enabled.
-# Detection: com.apple.cloudphotod writes "CPLEngineParameters-SystemLibrary" to its
-# defaults domain only when iCloud Photos is provisioned and actively syncing.
-# The Photos.plist key iCloudPhotoLibraryEnabled was deprecated/relocated in macOS
-# Sequoia/Tahoe and is no longer present in com.apple.Photos on modern systems.
+# Detection: combines two signals — either is sufficient.
+#   1. The Photos Library has a "cpl/" (Cloud Photo Library) subdir under
+#      resources/, which is created when iCloud Photos is provisioned for that
+#      library and persists across daemon idle states.
+#   2. com.apple.cloudphotod has a CPLEngineParameters-SystemLibrary key, set
+#      by the daemon when it's actively running. Authoritative when present
+#      but absent when the daemon has been idle.
 is_icloud_photos_enabled() {
+    [ -d "$HOME/Pictures/Photos Library.photoslibrary/resources/cpl" ] && return 0
     defaults read com.apple.cloudphotod "CPLEngineParameters-SystemLibrary" \
         >/dev/null 2>&1
 }
 
 # Returns 0 if Apple Music's iCloud Music Library / Sync Library is on.
-# Detection: _MPCloudServiceStatusControllerSubscriptionAvailability = 1 in
-# com.apple.Music means the account has an active Apple Music (or iTunes Match)
-# subscription with cloud library access. The cloudLibraryEnabled key that was
-# once writable by the app no longer appears in modern macOS; the per-library
-# sync toggle is stored in the binary Library.musicdb, not in UserDefaults.
+# Detection: combines two persistent signals from com.apple.Music defaults.
+#   1. _MPCloudServiceStatusControllerSubscriptionAvailability=1 — Music.app
+#      has confirmed an active Apple Music subscription with cloud library.
+#   2. doesStoreSupportCloudMusicLibrary=1 — Music.app has confirmed the
+#      account supports cloud library access. Stays set across launches.
+# Either signal being "1" means cloud library is available.
 is_icloud_music_enabled() {
-    [ "$(defaults read com.apple.Music \
-        _MPCloudServiceStatusControllerSubscriptionAvailability \
-        2>/dev/null)" = "1" ]
+    local v
+    v=$(defaults read com.apple.Music _MPCloudServiceStatusControllerSubscriptionAvailability 2>/dev/null) || true
+    [ "$v" = "1" ] && return 0
+    v=$(defaults read com.apple.Music doesStoreSupportCloudMusicLibrary 2>/dev/null) || true
+    [ "$v" = "1" ] && return 0
+    return 1
 }
 
 # Returns 0 if TV.app's iCloud / iTunes-in-the-Cloud is on.
