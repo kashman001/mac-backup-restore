@@ -978,22 +978,27 @@ echo ""
 # ── 5c. Classify Documents content before backing up
 info "Analyzing Documents folder structure..."
 DOC="$HOME/Documents"
+
+# DATA_CLASS is always initialized here so that Phase 5d-bis (cloud-sync
+# detection) can append CLOUD-SYNCED rows unconditionally, even when
+# ~/Documents does not exist (C2 regression fix).
+DATA_CLASS="$FILES/_data-classification.txt"
+{
+    echo "# ═══════════════════════════════════════════════════════════════"
+    echo "# Data Classification — generated $(date)"
+    echo "#"
+    echo "# How your data will be organized on the new Mac:"
+    echo "#   CLOUD-SYNCED → managed by iCloud (Photos Library, Music, etc.; re-syncs on new Mac)"
+    echo "#   DOCUMENTS    → personal and work files → ~/Documents/"
+    echo "#   ARCHIVAL     → large old data (Zoom, recordings) → consider cloud/external"
+    echo "#   APP-DATA     → created by specific apps → restored with the app"
+    echo "#   MEDIA        → photos, videos → ~/Pictures/ or ~/Movies/"
+    echo "#   STALE        → multi-machine sync artifacts, temp folders → review before migrating"
+    echo "# ═══════════════════════════════════════════════════════════════"
+    echo ""
+} > "$DATA_CLASS"
+
 if [ -d "$DOC" ]; then
-    DATA_CLASS="$FILES/_data-classification.txt"
-    {
-        echo "# ═══════════════════════════════════════════════════════════════"
-        echo "# Data Classification — generated $(date)"
-        echo "#"
-        echo "# How your data will be organized on the new Mac:"
-        echo "#   CLOUD-SYNCED → will re-sync via iCloud/OneDrive (backup = insurance)"
-        echo "#   DOCUMENTS    → personal and work files → ~/Documents/"
-        echo "#   ARCHIVAL     → large old data (Zoom, recordings) → consider cloud/external"
-        echo "#   APP-DATA     → created by specific apps → restored with the app"
-        echo "#   MEDIA        → photos, videos → ~/Pictures/ or ~/Movies/"
-        echo "#   STALE        → multi-machine sync artifacts, temp folders → review before migrating"
-        echo "# ═══════════════════════════════════════════════════════════════"
-        echo ""
-    } > "$DATA_CLASS"
 
     # Detect multi-machine sync artifacts
     STALE_DIRS=""

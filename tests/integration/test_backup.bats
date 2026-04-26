@@ -1022,3 +1022,19 @@ EOF
     # No --exclude for Photos Library in any rsync call.
     ! grep -q -- '--exclude=Photos Library.photoslibrary' "$MOCK_BIN/rsync.calls"
 }
+
+@test "phase 5: Phase 5d-bis writes to classification file even when ~/Documents missing (C2 regression)" {
+    # Note: setup() calls prep_required_home_dirs which creates Documents.
+    # Remove it here to test the code path where ~/Documents is absent.
+    # The classification file should still be created and the CLOUD-SYNCED row
+    # should still be written (driven by Desktop, not Documents).
+    rm -rf "$FAKE_HOME/Documents"
+    make_fake_icloud_dir "$FAKE_HOME/Desktop"
+    # Put a file in Desktop so the backup loop doesn't skip it as empty.
+    echo "desktop-file" > "$FAKE_HOME/Desktop/note.txt"
+    run_backup_yes
+    [ "$status" -eq 0 ]
+    bd=$(backup_dir)
+    [ -f "$bd/files/_data-classification.txt" ]
+    grep -q '^CLOUD-SYNCED.*Desktop/' "$bd/files/_data-classification.txt"
+}
