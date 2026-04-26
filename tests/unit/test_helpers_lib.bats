@@ -5,7 +5,12 @@
 load '../test_helper'
 
 setup() {
+    setup_test_env
     source "$LIB_DIR/helpers.sh"
+}
+
+teardown() {
+    teardown_test_env
 }
 
 # ── lookup() ────────────────────────────────────────────────────────────────
@@ -215,34 +220,27 @@ setup() {
 # ── is_icloud_drive_synced() ───────────────────────────────────────────────
 
 @test "is_icloud_drive_synced: true when CloudDocs xattr is present" {
-    setup_test_env
     make_fake_icloud_dir "$FAKE_HOME/Documents"
     is_icloud_drive_synced "$FAKE_HOME/Documents"
-    teardown_test_env
 }
 
 @test "is_icloud_drive_synced: false on a plain directory" {
-    setup_test_env
     mkdir -p "$FAKE_HOME/plain"
     # Don't install an xattr mock — the helper hits the real `xattr`, which
     # exits non-zero on a missing key (stderr suppressed by 2>/dev/null), and
     # its empty stdout makes `grep -q` exit 1, so the helper returns 1.
     ! is_icloud_drive_synced "$FAKE_HOME/plain"
-    teardown_test_env
 }
 
 @test "is_icloud_drive_synced: false when the path does not exist" {
-    setup_test_env
     # Don't install an xattr mock — the helper's [ -e ] check short-circuits
     # before xattr is ever called, so no mock is needed.
     ! is_icloud_drive_synced "$FAKE_HOME/nope"
-    teardown_test_env
 }
 
 # ── is_icloud_photos_enabled() ─────────────────────────────────────────────
 
 @test "is_icloud_photos_enabled: true when cloudphotod has CPLEngineParameters-SystemLibrary" {
-    setup_test_env
     mock_command_script defaults <<'EOF'
 if [ "$1" = "read" ] && [ "$2" = "com.apple.cloudphotod" ] && [ "$3" = "CPLEngineParameters-SystemLibrary" ]; then
     echo "{ clientLibraryBasePath = \"/fake/Photos Library.photoslibrary/resources/cpl/cloudsync.noindex\"; }"
@@ -251,29 +249,23 @@ fi
 exit 1
 EOF
     is_icloud_photos_enabled
-    teardown_test_env
 }
 
 @test "is_icloud_photos_enabled: false when cloudphotod key is absent" {
-    setup_test_env
     mock_command_failing defaults
     ! is_icloud_photos_enabled
-    teardown_test_env
 }
 
 @test "is_icloud_photos_enabled: false when defaults read exits non-zero" {
-    setup_test_env
     mock_command_script defaults <<'EOF'
 exit 1
 EOF
     ! is_icloud_photos_enabled
-    teardown_test_env
 }
 
 # ── is_icloud_music_enabled() ──────────────────────────────────────────────
 
 @test "is_icloud_music_enabled: true when SubscriptionAvailability is 1" {
-    setup_test_env
     mock_command_script defaults <<'EOF'
 if [ "$1" = "read" ] && [ "$2" = "com.apple.Music" ] && [ "$3" = "_MPCloudServiceStatusControllerSubscriptionAvailability" ]; then
     echo "1"
@@ -282,11 +274,9 @@ fi
 exit 1
 EOF
     is_icloud_music_enabled
-    teardown_test_env
 }
 
 @test "is_icloud_music_enabled: false when SubscriptionAvailability is 0" {
-    setup_test_env
     mock_command_script defaults <<'EOF'
 if [ "$1" = "read" ] && [ "$2" = "com.apple.Music" ] && [ "$3" = "_MPCloudServiceStatusControllerSubscriptionAvailability" ]; then
     echo "0"
@@ -295,20 +285,16 @@ fi
 exit 1
 EOF
     ! is_icloud_music_enabled
-    teardown_test_env
 }
 
 @test "is_icloud_music_enabled: false when defaults read fails" {
-    setup_test_env
     mock_command_failing defaults
     ! is_icloud_music_enabled
-    teardown_test_env
 }
 
 # ── is_icloud_tv_enabled() ─────────────────────────────────────────────────
 
 @test "is_icloud_tv_enabled: true when cloudLibraryEnabled is 1" {
-    setup_test_env
     mock_command_script defaults <<'EOF'
 if [ "$1" = "read" ] && [ "$2" = "com.apple.TV" ] && [ "$3" = "cloudLibraryEnabled" ]; then
     echo "1"
@@ -317,12 +303,9 @@ fi
 exit 1
 EOF
     is_icloud_tv_enabled
-    teardown_test_env
 }
 
 @test "is_icloud_tv_enabled: false when defaults read fails" {
-    setup_test_env
     mock_command_failing defaults
     ! is_icloud_tv_enabled
-    teardown_test_env
 }
